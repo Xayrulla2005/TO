@@ -39,11 +39,23 @@ export class ProductEntity {
   @Column({ type: 'uuid', nullable: true, name: 'category_id' })
   categoryId?: string | null;
 
-  @Column({ type: 'numeric', precision: 12, scale: 2, default: 0 })
-  purchasePrice!: number; // Cost price (what we paid)
+  @Column({
+  type: "numeric",
+  precision: 12,
+  scale: 2,
+  default: 0,
+  name: "purchase_price",
+})
+purchasePrice!: number;
 
-  @Column({ type: 'numeric', precision: 12, scale: 2, default: 0 })
-  salePrice!: number; // Base selling price
+  @Column({
+  type: "numeric",
+  precision: 12,
+  scale: 2,
+  default: 0,
+  name: "sale_price",
+})
+salePrice!: number;
 
   @Column({ type: 'varchar', length: 500, nullable: true })
   imageUrl?: string | null; // Relative path to uploaded image
@@ -51,8 +63,8 @@ export class ProductEntity {
   @Column({ type: 'varchar', length: 20, default: ProductUnit.PIECE })
   unit!: ProductUnit;
 
-  @Column({ type: 'numeric', precision: 12, scale: 2, default: 0 })
-  stockQuantity!: number;
+  @Column({ name: "stock_quantity", type: "int", default: 0 })
+stockQuantity!: number;
 
   @Column({ type: 'numeric', precision: 12, scale: 2, default: 0, name: 'min_stock_limit' })
   minStockLimit!: number;
