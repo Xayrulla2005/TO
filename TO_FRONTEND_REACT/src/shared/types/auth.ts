@@ -1,10 +1,11 @@
-export type Role = 'ADMIN' | 'SALER';
+export type Role = "ADMIN" | "SALER";
 
 export interface User {
   id: string;
-  username: string;
+  fullName: string;
+  phone: string;
   role: Role;
-  name: string;
+  isActive: boolean;
 }
 
 export interface LoginResponse {

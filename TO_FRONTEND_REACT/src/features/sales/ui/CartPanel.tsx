@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useSalesStore } from '../model/sales.store';
 import { Button } from '../../../shared/ui/Button';
-import { Input } from '@/shared/ui/Input';
-import { formatCurrency } from '@/shared/lib/utils';
+import { Input } from '../../../shared/ui/Input';
+import { formatCurrency } from '../../../shared/lib/utils';
 import { Trash2 } from 'lucide-react';
 import { useMutation } from '@tanstack/react-query';
-import { api } from '@/shared/lib/axios';
+import { api } from '../../../shared/lib/axios';
 
 export function CartPanel() {
   const { cart, updateQty, removeFromCart, cartTotal, clearCart } = useSalesStore();

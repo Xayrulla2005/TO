@@ -18,7 +18,7 @@ export function MobileDrawer({ isOpen, onClose }: MobileDrawerProps) {
           onClick={onClose}
           className="px-3 py-2 border rounded"
         >
-          Close
+          Yopish
         </button>
       </div>
     </div>

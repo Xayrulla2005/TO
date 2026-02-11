@@ -1,10 +1,17 @@
-import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
+// src/common/bootstrap/bootstrap-admin.service.ts
+import {
+  ConflictException,
+  Injectable,
+  Logger,
+  OnModuleInit,
+} from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import * as bcrypt from "bcrypt";
 
-import { UserEntity } from "../../user/entities/user.entity"; // sizda path boshqacha bo‘lishi mumkin
-import { UserRole } from "../../common/dto/roles.enum"; // sizda enum nomi boshqacha bo‘lishi mumkin
+import { UserEntity } from "../../user/entities/user.entity";
+import { UserRole } from "../../common/dto/roles.enum";
+import { CreateUserDto } from "../../user/dto/create-user.dto";
 
 @Injectable()
 export class BootstrapAdminService implements OnModuleInit {
@@ -15,52 +22,65 @@ export class BootstrapAdminService implements OnModuleInit {
     private readonly usersRepo: Repository<UserEntity>,
   ) {}
 
-  async onModuleInit(): Promise<void> {
-    // faqat development/test/prod ham bo‘lishi mumkin.
-    // Siz xohlasangiz bu joyga shart qo‘shib qo‘yishingiz mumkin.
+  async onModuleInit() {
+    const admin = await this.usersRepo.findOne({
+      where: { role: UserRole.ADMIN },
+    });
 
-    const adminExists = await this.usersRepo
-  .createQueryBuilder("u")
-  .withDeleted()
-  .where("u.role = :role", { role: "ADMIN" })
-  .getExists();
-
-    if (adminExists) {
-      this.logger.log("Admin already exists. Bootstrap skipped.");
+    if (admin) {
+      this.logger.log("Admin mavjud");
       return;
     }
 
-    const username = process.env.BOOTSTRAP_ADMIN_USERNAME;
-    const email = process.env.BOOTSTRAP_ADMIN_EMAIL;
-    const password = process.env.BOOTSTRAP_ADMIN_PASSWORD;
+    const fullName = process.env.BOOTSTRAP_ADMIN_FULLNAME || "Admin";
+    const phone = process.env.BOOTSTRAP_ADMIN_PHONE || "+998000000000";
+    const plainPassword = process.env.BOOTSTRAP_ADMIN_PASSWORD;
 
-    const firstName = process.env.BOOTSTRAP_ADMIN_FIRST_NAME || "System";
-    const lastName = process.env.BOOTSTRAP_ADMIN_LAST_NAME || "Admin";
-
-    if (!username || !email || !password) {
+    if (!plainPassword) {
       this.logger.warn(
-        "No ADMIN found, but bootstrap admin env variables are missing. Skipping bootstrap.",
+        "BOOTSTRAP_ADMIN_PASSWORD .env da topilmadi. Admin yaratilmadi.",
       );
       return;
     }
 
-    const passwordHash = await bcrypt.hash(password, 12);
+    const hashedPassword = await bcrypt.hash(plainPassword, 12);
 
-    const admin = this.usersRepo.create({
-      username,
-      email,
-      password: passwordHash,
-      firstName,
-      lastName,
+    const newAdmin = this.usersRepo.create({
+      fullName,
+      phone,
+      password: hashedPassword,
       role: UserRole.ADMIN,
       isActive: true,
     });
 
-    await this.usersRepo.save(admin);
+    await this.usersRepo.save(newAdmin);
 
-    this.logger.log("Bootstrap ADMIN created successfully.");
-    this.logger.warn(
-      `Bootstrap credentials: username=${username}, email=${email}`,
+    this.logger.log(
+      `Admin yaratildi: fullName=${fullName}, phone=${phone}`,
     );
+  }
+
+  async create(dto: CreateUserDto) {
+    // Phone bo'yicha tekshirish (phone unique)
+    const existingUser = await this.usersRepo.findOne({
+      where: { phone: dto.phone },
+      withDeleted: true,
+    });
+
+    if (existingUser) {
+      throw new ConflictException("Bu telefon raqami bilan foydalanuvchi mavjud");
+    }
+
+    const hashedPassword = await bcrypt.hash(dto.password, 12);
+
+    const user = this.usersRepo.create({
+      fullName: dto.fullName, // ✅ TO'G'RI
+      phone: dto.phone,
+      password: hashedPassword,
+      role: dto.role || UserRole.SALER,
+      isActive: dto.isActive ?? true,
+    });
+
+    return await this.usersRepo.save(user);
   }
 }

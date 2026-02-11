@@ -11,13 +11,16 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+
 import { UsersService } from './user.service';
 import { CreateUserDto, UpdateUserDto } from './dto/create-user.dto';
+
 import { JwtAuthGuard } from '../common/guards/jwt.auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decarators/roles.decarator';
 import { CurrentUser } from '../common/decarators/current.user.decarator';
+
 import { UserRole } from '../common/dto/roles.enum';
 import { UserEntity } from './entities/user.entity';
 import { PaginationDto } from '../common/dto/pagination.dto';

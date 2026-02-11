@@ -5,16 +5,15 @@ import { PassportStrategy } from '@nestjs/passport';
 import { Strategy, ExtractJwt } from 'passport-jwt';
 import { config } from 'dotenv';
 import { UserEntity } from '../user/entities/user.entity';
+import { UserRole } from 'src/common/dto/roles.enum';
 
 config();
 
-export interface JwtPayload {
-  sub: string;       // user id
-  username: string;
-  role: string;
-  iat?: number;
-  exp?: number;
-}
+export type JwtPayload = {
+  sub: string;
+  fullName: string;
+  role: UserRole;
+};
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {

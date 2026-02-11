@@ -4,9 +4,9 @@ import { cn } from '@/shared/lib/utils';
 
 export function BottomNav() {
   const links = [
-    { to: '/dashboard', icon: LayoutDashboard, label: 'Dash' },
-    { to: '/sales', icon: ShoppingCart, label: 'POS' },
-    { to: '/products', icon: Package, label: 'Products' },
+    { to: '/dashboard', icon: LayoutDashboard, label: 'Boshsahifa' },
+    { to: '/sales', icon: ShoppingCart, label: 'Sotish' },
+    { to: '/products', icon: Package, label: 'Mahsulotlar' },
   ];
 
   return (

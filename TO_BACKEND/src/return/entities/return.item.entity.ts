@@ -1,4 +1,4 @@
-import { SaleItemEntity } from 'src/sale/entities/sale.item.entity';
+import { SaleItemEntity } from '../../sale/entities/sale.item.entity';
 import {
   Column as Col4,
   Entity as Ent4,

@@ -1,19 +1,19 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { productsApi } from '../features/products/api/product.api';
-import { useAuthStore } from '@/features/auth/model/auth.store';
-import { Button } from '@/shared/ui/Button';
-import { Card } from '@/shared/ui/Card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/shared/ui/Table';
+import { useAuthStore } from '../features/auth/model/auth.store';
+import { Button } from '../shared/ui/Button';
+import { Card } from '../shared/ui/Card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../shared/ui/Table';
 import { ProductFormModal } from '../features/products/api/ui/ProductFormModal';
-import { Modal } from '@/shared/ui/Modal';
-import { Input } from '@/shared/ui/Input';
-import { Badge } from '@/shared/ui/Badge';
-import { toast } from '@/shared/ui/Toast';
-import { LoadingSpinner } from '@/shared/ui/Loading';
+import { Modal } from '../shared/ui/Modal';
+import { Input } from '../shared/ui/Input';
+import { Badge } from '../shared/ui/Badge';
+import { toast } from '../shared/ui/Toast';
+import { LoadingSpinner } from '../shared/ui/Loading';
 import { Plus, Edit, Trash2, Search, Package, AlertTriangle } from 'lucide-react';
-import { formatCurrency } from '@/shared/lib/utils';
-import { Product } from '@/shared/types/product';
+import { formatCurrency } from '../shared/lib/utils';
+import { Product } from '../shared/types/product';
 
 export function ProductsPage() {
   const { user } = useAuthStore();
@@ -25,10 +25,10 @@ export function ProductsPage() {
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  const { data: products, isLoading } = useQuery({
-    queryKey: ['products'],
-    queryFn: productsApi.getAll,
-  });
+const { data: products, isLoading } = useQuery({
+  queryKey: ['products'],
+  queryFn: productsApi.getAll,
+});
 
   const deleteMutation = useMutation({
     mutationFn: productsApi.delete,
@@ -50,10 +50,10 @@ export function ProductsPage() {
     setIsFormOpen(true);
   };
 
-  const filteredProducts = products?.filter(p => 
-    p.name.toLowerCase().includes(search.toLowerCase()) || 
-    p.category?.name.toLowerCase().includes(search.toLowerCase())
-  );
+  const filteredProducts = (products || []).filter((p: { name: string; category: { name: any; }; }) => 
+  p.name.toLowerCase().includes(search.toLowerCase()) || 
+  (p.category?.name ?? '').toLowerCase().includes(search.toLowerCase())
+);
 
   if (isLoading) return <LoadingSpinner className="h-96" />;
 
@@ -61,12 +61,12 @@ export function ProductsPage() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Products Inventory</h1>
-          <p className="text-gray-500">Manage {products?.length || 0} items</p>
+          <h1 className="text-2xl font-bold text-gray-900">Mahsulotlar ombori</h1>
+          <p className="text-gray-500"> {products?.length || 0} ta mahsulotni boshqarish</p>
         </div>
         {isAdmin && (
           <Button leftIcon={<Plus size={18} />} onClick={handleCreate}>
-            Add Product
+            Mahsulot qoshish
           </Button>
         )}
       </div>
@@ -86,17 +86,17 @@ export function ProductsPage() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Product</TableHead>
-              <TableHead>Category</TableHead>
-              <TableHead>Purch. Price</TableHead>
-              <TableHead>Sale Price</TableHead>
-              <TableHead>Stock</TableHead>
-              <TableHead>Status</TableHead>
-              {isAdmin && <TableHead className="text-right">Actions</TableHead>}
+              <TableHead>Mahsulot</TableHead>
+              <TableHead>Kategoriya</TableHead>
+              <TableHead>Kelish narxi</TableHead>
+              <TableHead>Sotuv narxi</TableHead>
+              <TableHead>Qoldiq</TableHead>
+              <TableHead>Holati</TableHead>
+              {isAdmin && <TableHead className="text-right">Amallar</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredProducts?.map((product) => (
+            {(filteredProducts || []).map((product: Product) => (
               <TableRow key={product.id}>
                 <TableCell>
                   <div className="flex items-center gap-3">
@@ -120,13 +120,13 @@ export function ProductsPage() {
                   {formatCurrency(product.salePrice)}
                 </TableCell>
                 <TableCell>
-                  <span className={product.stockQty <= 5 ? "text-red-600 font-bold" : "text-gray-700"}>
+                  <span className={product.stockQuantity <= (product.minStockLimit ?? 5) ? "text-red-600 font-bold" : "text-gray-700"}>
                     {product.stockQty}
                   </span>
                 </TableCell>
                 <TableCell>
-                  <Badge variant={product.stockQty > 0 ? 'success' : 'danger'}>
-                    {product.stockQty > 0 ? 'In Stock' : 'Out of Stock'}
+                  <Badge variant={product.stockQuantity > 0 ? 'success' : 'danger'}>
+                    {product.stockQuantity > 0 ? 'Omborda bor' : 'Omborda yo‘q'}
                   </Badge>
                 </TableCell>
                 {isAdmin && (
@@ -152,7 +152,7 @@ export function ProductsPage() {
             {filteredProducts?.length === 0 && (
               <TableRow>
                 <TableCell colSpan={isAdmin ? 7 : 6} className="text-center py-8 text-gray-500">
-                  No products found.
+                  Mahsulot topilmadi.
                 </TableCell>
               </TableRow>
             )}
@@ -169,25 +169,25 @@ export function ProductsPage() {
       <Modal
         isOpen={!!deletingId}
         onClose={() => setDeletingId(null)}
-        title="Confirm Deletion"
+        title="Ochirishni tasdiqlash"
         size="sm"
       >
         <div className="space-y-4">
           <div className="flex items-center gap-3 text-red-600 bg-red-50 p-3 rounded-lg">
             <AlertTriangle size={24} />
-            <p className="text-sm font-medium">Permanently delete product?</p>
+            <p className="text-sm font-medium">Mahsulot butunlay ochirilsinmi?</p>
           </div>
           <p className="text-gray-600">
-            This action cannot be undone. Sales history for this product might be preserved for audit logs.
+            Bu amalni ortga qaytarib bolmaydi. Ushbu mahsulot boyicha savdo tarixi audit jurnali uchun saqlanib qolishi mumkin.
           </p>
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setDeletingId(null)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setDeletingId(null)}>Bekor qilish</Button>
             <Button 
               variant="danger" 
               isLoading={deleteMutation.isPending} 
               onClick={() => deletingId && deleteMutation.mutate(deletingId)}
             >
-              Delete Product
+              Mahsulotni ochirish
             </Button>
           </div>
         </div>

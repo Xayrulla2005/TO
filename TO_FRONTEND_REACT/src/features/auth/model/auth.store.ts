@@ -1,15 +1,21 @@
+// src/features/auth/model/auth.store.ts
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { User } from '@/shared/types/auth';
+
+interface User {
+  id: string;
+  fullName: string;
+  phone: string;
+  role: string;
+  isActive: boolean;
+}
 
 interface AuthState {
   user: User | null;
   accessToken: string | null;
-  isAuthenticated: boolean;
+  isAuthenticated: boolean; // ✅ Qo'shildi
   login: (user: User, token: string) => void;
   logout: () => void;
-  setAccessToken: (token: string) => void;
-  setUser: (user: User) => void;
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -17,15 +23,36 @@ export const useAuthStore = create<AuthState>()(
     (set) => ({
       user: null,
       accessToken: null,
-      isAuthenticated: false,
-      login: (user, accessToken) => set({ user, accessToken, isAuthenticated: true }),
-      logout: () => set({ user: null, accessToken: null, isAuthenticated: false }),
-      setAccessToken: (accessToken) => set({ accessToken }),
-      setUser: (user) => set({ user }),
+      isAuthenticated: false, // ✅ Default qiymat
+      
+      login: (user, token) => {
+        console.log('🔐 Login:', { user, accessToken: token });
+        
+        // ✅ localStorage ga saqlash
+        localStorage.setItem('accessToken', token);
+        
+        console.log('✅ Token localStorage ga saqlandi');
+        console.log('🔑 Tekshirish:', localStorage.getItem('accessToken'));
+        
+        set({ 
+          user, 
+          accessToken: token,
+          isAuthenticated: true // ✅ True ga o'zgaradi
+        });
+      },
+      
+      logout: () => {
+        console.log('🔓 Logout');
+        localStorage.removeItem('accessToken');
+        set({ 
+          user: null, 
+          accessToken: null,
+          isAuthenticated: false // ✅ False ga qaytadi
+        });
+      },
     }),
     {
-      name: 'erp-auth-storage',
-      partialize: (state) => ({ accessToken: state.accessToken, isAuthenticated: state.isAuthenticated }),
+      name: 'auth-storage',
     }
   )
 );

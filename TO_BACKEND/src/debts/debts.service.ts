@@ -5,21 +5,28 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
-} from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
-import { DebtEntity, DebtStatus } from './entities/debt.entity';
-import { SaleEntity } from '../sale/entities/sale.entity';
-import { MakePaymentDto } from './dto/create-debt.dto';
-import { PaginationDto, PaginatedResponseDto } from '../common/dto/pagination.dto';
-import { AuditLogService } from '../audit-logs/audit-logs.service';
-import { AuditAction, AuditEntity as AuditEntityEnum } from '../audit-logs/entities/audit-log.entity';
-import { SaleQueryDto } from 'src/sale/dto/sale.query.dto';
+} from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository, DataSource } from "typeorm";
+import { DebtEntity, DebtStatus } from "./entities/debt.entity";
+import { SaleEntity } from "../sale/entities/sale.entity";
+import { DebtQueryDto } from "./dto/debt.query.dto";
+import {
+  PaginationDto,
+  PaginatedResponseDto,
+} from "../common/dto/pagination.dto";
+import { AuditLogService } from "../audit-logs/audit-logs.service";
+import {
+  AuditAction,
+  AuditEntity as AuditEntityEnum,
+} from "../audit-logs/entities/audit-log.entity";
+import { SaleQueryDto } from "src/sale/dto/sale.query.dto";
+import { MakePaymentDto } from "./dto/make.payment.dto";
 
 @Injectable()
 export class DebtsService {
   findById(id: string) {
-    throw new Error('Method not implemented.');
+    throw new Error("Method not implemented.");
   }
   constructor(
     @InjectRepository(DebtEntity)
@@ -30,48 +37,58 @@ export class DebtsService {
     private readonly auditLogService: AuditLogService,
   ) {}
 
-  async findAll(
-  pagination: SaleQueryDto,
-): Promise<PaginatedResponseDto<SaleEntity>> {
+  async findAll(query: DebtQueryDto) {
+  const page = Number(query.page ?? 1);
+  const limit = Number(query.limit ?? 20);
 
-  const { page = 1, limit = 20, search, status } = pagination;
+  const qb = this.debtRepository
+    .createQueryBuilder("debt")
+    .leftJoinAndSelect("debt.sale", "sale")
+    .orderBy("debt.createdAt", "DESC");
 
-    const query = this.debtRepository
-      .createQueryBuilder('debt')
-      .leftJoinAndSelect('debt.sale', 'sale')
-      .orderBy('debt.created_at', 'DESC');
-
-    if (search) {
-      query.andWhere(
-        '(debt.debtor_name LIKE :search OR debt.debtor_phone LIKE :search)',
-        { search: `%${search}%` },
-      );
-    }
-
-    if (status) {
-      query.andWhere('debt.status = :status', { status });
-    }
-
-    const [debts, total] = await query
-      .skip((page - 1) * limit)
-      .take(limit)
-      .getManyAndCount();
-
-    const data = debts.map((d) => this.buildDebtResponse(d));
-
-return PaginatedResponseDto.create(data, total, page, limit);
+  if (query.search) {
+    qb.andWhere(
+      "(debt.debtorName ILIKE :search OR debt.debtorPhone ILIKE :search)",
+      { search: `%${query.search}%` },
+    );
   }
-  buildDebtResponse(d: DebtEntity): any {
-    throw new Error('Method not implemented.');
+
+  if (query.status) {
+    qb.andWhere("debt.status = :status", { status: query.status });
   }
+
+  const [debts, total] = await qb
+    .skip((page - 1) * limit)
+    .take(limit)
+    .getManyAndCount();
+
+  const data = debts.map((d) => this.buildDebtResponse(d));
+
+  return PaginatedResponseDto.create(data, total, page, limit);
+}
+
+
+  private buildDebtResponse(d: DebtEntity) {
+  return {
+    id: d.id,
+    debtorName: d.debtorName,
+    debtorPhone: d.debtorPhone,
+    originalAmount: Number(d.originalAmount),
+    remainingAmount: Number(d.remainingAmount),
+    status: d.status,
+    saleId: d.saleId,
+    createdAt: d.createdAt,
+    updatedAt: d.updatedAt,
+  };
+}
 
   async findOne(id: string): Promise<DebtEntity> {
     const debt = await this.debtRepository.findOne({
       where: { id },
-      relations: ['sale'],
+      relations: ["sale"],
     });
 
-    if (!debt) throw new NotFoundException('Debt not found');
+    if (!debt) throw new NotFoundException("Debt not found");
     return debt;
   }
 
@@ -83,24 +100,24 @@ return PaginatedResponseDto.create(data, total, page, limit);
     try {
       const debt = await queryRunner.manager.findOne(DebtEntity, {
         where: { id: debtId },
-        lock: { mode: 'pessimistic_write' },
+        lock: { mode: "pessimistic_write" },
       });
 
-      if (!debt) throw new NotFoundException('Debt not found');
-      
+      if (!debt) throw new NotFoundException("Debt not found");
+
       if (debt.status === DebtStatus.PAID) {
-        throw new BadRequestException('Debt is already fully paid');
+        throw new BadRequestException("Debt is already fully paid");
       }
 
       if (debt.status === DebtStatus.CANCELLED) {
-        throw new BadRequestException('Cannot pay cancelled debt');
+        throw new BadRequestException("Cannot pay cancelled debt");
       }
 
       const remaining = Number(debt.remainingAmount);
       const payment = dto.amount;
 
       if (payment <= 0) {
-        throw new BadRequestException('Payment amount must be positive');
+        throw new BadRequestException("Payment amount must be positive");
       }
 
       if (payment > remaining) {
@@ -124,9 +141,7 @@ return PaginatedResponseDto.create(data, total, page, limit);
       }
 
       if (dto.note) {
-        debt.notes = debt.notes
-          ? `${debt.notes}\n${dto.note}`
-          : dto.note;
+        debt.notes = debt.notes ? `${debt.notes}\n${dto.note}` : dto.note;
       }
 
       await queryRunner.manager.save(debt);
@@ -159,14 +174,14 @@ return PaginatedResponseDto.create(data, total, page, limit);
   async cancel(debtId: string, userId: string): Promise<DebtEntity> {
     const debt = await this.debtRepository.findOne({ where: { id: debtId } });
 
-    if (!debt) throw new NotFoundException('Debt not found');
-    
+    if (!debt) throw new NotFoundException("Debt not found");
+
     if (debt.status === DebtStatus.PAID) {
-      throw new BadRequestException('Cannot cancel paid debt');
+      throw new BadRequestException("Cannot cancel paid debt");
     }
 
     if (debt.status === DebtStatus.CANCELLED) {
-      throw new BadRequestException('Debt is already cancelled');
+      throw new BadRequestException("Debt is already cancelled");
     }
 
     const beforeStatus = debt.status;
@@ -196,12 +211,12 @@ return PaginatedResponseDto.create(data, total, page, limit);
     totalPaidAmount: number;
   }> {
     const summary = await this.debtRepository
-      .createQueryBuilder('debt')
-      .select('debt.status', 'status')
-      .addSelect('COUNT(*)', 'count')
-      .addSelect('SUM(debt.remaining_amount)', 'remainingAmount')
-      .addSelect('SUM(debt.original_amount)', 'originalAmount')
-      .groupBy('debt.status')
+      .createQueryBuilder("debt")
+      .select("debt.status", "status")
+      .addSelect("COUNT(*)", "count")
+      .addSelect("SUM(debt.remaining_amount)", "remainingAmount")
+      .addSelect("SUM(debt.original_amount)", "originalAmount")
+      .groupBy("debt.status")
       .getRawMany();
 
     const result = {
@@ -225,13 +240,17 @@ return PaginatedResponseDto.create(data, total, page, limit);
       result.totalOriginalAmount += original;
 
       if (row.status === DebtStatus.PENDING) result.pendingDebts = count;
-      if (row.status === DebtStatus.PARTIALLY_PAID) result.partiallyPaidDebts = count;
+      if (row.status === DebtStatus.PARTIALLY_PAID)
+        result.partiallyPaidDebts = count;
       if (row.status === DebtStatus.PAID) result.paidDebts = count;
       if (row.status === DebtStatus.CANCELLED) result.cancelledDebts = count;
     }
 
-    result.totalPaidAmount = result.totalOriginalAmount - result.totalRemainingAmount;
+    result.totalPaidAmount =
+      result.totalOriginalAmount - result.totalRemainingAmount;
 
     return result;
   }
+
+  
 }

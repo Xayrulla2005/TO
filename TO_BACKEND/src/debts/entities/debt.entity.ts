@@ -1,4 +1,4 @@
-import { SaleEntity } from 'src/sale/entities/sale.entity';
+import { SaleEntity } from '../../sale/entities/sale.entity';
 import {
   Column as Col2,
   CreateDateColumn as CDC2,

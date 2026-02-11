@@ -1,6 +1,5 @@
-// ============================================================
-// src/sales/dto/sale.dto.ts
-// ============================================================
+// src/sale/dto/create-sale.dto.ts
+
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsString,
@@ -60,33 +59,7 @@ export class CreateSaleDto {
   notes?: string;
 }
 
-// ─── Complete Sale (triggers inventory decrease) ───────────
-export class CompleteSaleDto {
-  @ApiProperty({ description: 'Payment entries for this sale' })
-  @IsArray()
-  @ArrayNotEmpty({ message: 'At least one payment method is required' })
-  @ValidateNested({ each: true })
-  @Type(() => PaymentInputDto)
-  payments!: PaymentInputDto[];
-
-  @ApiPropertyOptional({ description: 'Debtor name (required if any payment is DEBT)' })
-  @IsOptional()
-  @IsString()
-  debtorName?: string;
-
-  @ApiPropertyOptional({ description: 'Debtor phone (required if any payment is DEBT)' })
-  @IsOptional()
-  @IsString()
-  debtorPhone?: string;
-
-  @ApiPropertyOptional({ description: 'Due date for debt payment' })
-  @IsOptional()
-  @IsString()
-  debtDueDate?: string; // ISO date string
-  dueDate: any;
-  debtNotes: any;
-}
-
+// ─── Payment Input ──────────────────────────────────────────
 export class PaymentInputDto {
   @ApiProperty({ enum: PaymentMethod })
   @IsEnum(PaymentMethod)
@@ -104,6 +77,40 @@ export class PaymentInputDto {
   notes?: string;
 }
 
+// ─── Complete Sale (triggers inventory decrease) ───────────
+export class CompleteSaleDto {
+  @ApiProperty({ 
+    description: 'Payment entries for this sale',
+    type: [PaymentInputDto],
+  })
+  @IsArray()
+  @ArrayNotEmpty({ message: 'At least one payment method is required' })
+  @ValidateNested({ each: true })
+  @Type(() => PaymentInputDto)
+  payments!: PaymentInputDto[];
+
+  @ApiPropertyOptional({ description: 'Debtor name (required if any payment is DEBT)' })
+  @IsOptional()
+  @IsString()
+  debtorName?: string;
+
+  @ApiPropertyOptional({ description: 'Debtor phone (required if any payment is DEBT)' })
+  @IsOptional()
+  @IsString()
+  debtorPhone?: string;
+
+  @ApiPropertyOptional({ description: 'Due date for debt payment (ISO date string)' })
+  @IsOptional()
+  @IsString()
+  debtDueDate?: string;
+
+  @ApiPropertyOptional({ description: 'Notes for debt' })
+  @IsOptional()
+  @IsString()
+  debtNotes?: string;
+
+}
+
 // ─── Cancel Sale ────────────────────────────────────────────
 export class CancelSaleDto {
   @ApiPropertyOptional({ description: 'Reason for cancellation' })
@@ -112,7 +119,7 @@ export class CancelSaleDto {
   reason?: string;
 }
 
-// ─── Update Sale Item (SALER can only change customUnitPrice and discountAmount) ──
+// ─── Update Sale Item ───────────────────────────────────────
 export class UpdateSaleItemDto {
   @ApiProperty({ description: 'Sale item UUID' })
   @IsUUID()
@@ -145,60 +152,4 @@ export class UpdateSaleDto {
   @IsOptional()
   @IsString()
   notes?: string;
-}
-
-// ─── Sale Response ──────────────────────────────────────────
-export class SaleResponseDto {
-  id!: string;
-  saleNumber!: string;
-  status!: string;
-  subtotal!: number;
-  totalDiscount!: number;
-  grandTotal!: number;
-  grossProfit!: number;
-  netProfit!: number;
-  notes?: string | null;
-  createdById!: string;
-  createdByUsername!: string;
-  completedAt?: Date | null;
-  cancelledAt?: Date | null;
-  cancellationReason?: string | null;
-  createdAt!: Date;
-  updatedAt!: Date;
-  items!: SaleItemResponseDto[];
-  payments?: PaymentResponseDto[];
-  debt?: DebtResponseDto;
-}
-
-export class SaleItemResponseDto {
-  id!: string;
-  productId?: string | null;
-  productNameSnapshot!: string;
-  categorySnapshot?: string | null;
-  baseUnitPrice!: number;
-  customUnitPrice!: number;
-  purchasePriceSnapshot!: number;
-  quantity!: number;
-  unitSnapshot!: string;
-  baseTotal!: number;
-  customTotal!: number;
-  discountAmount!: number;
-}
-
-export class PaymentResponseDto {
-  id!: string;
-  method!: string;
-  amount!: number;
-  notes?: string | null;
-  createdAt!: Date;
-}
-
-export class DebtResponseDto {
-  id!: string;
-  debtorName!: string;
-  debtorPhone!: string;
-  originalAmount!: number;
-  remainingAmount!: number;
-  status!: string;
-  dueDate?: Date | null;
 }

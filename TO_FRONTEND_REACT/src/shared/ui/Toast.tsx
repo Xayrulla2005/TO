@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { X, CheckCircle, AlertCircle, Info } from 'lucide-react';
-import { cn } from '@/shared/lib/utils';
+import { cn } from '../lib/utils';
 
 type ToastType = 'success' | 'error' | 'info';
 
@@ -56,8 +56,29 @@ export function ToastContainer() {
   );
 }
 
+import { toast as sonnerToast } from 'sonner';
+
 export const toast = {
-  success: (msg: string) => useToastStore.getState().addToast(msg, 'success'),
-  error: (msg: string) => useToastStore.getState().addToast(msg, 'error'),
-  info: (msg: string) => useToastStore.getState().addToast(msg, 'info'),
+  success: (message: string) => {
+    sonnerToast.success(message);
+  },
+  
+  error: (error: any) => {
+    // ✅ Object xatosini hal qilish
+    let message = 'Xatolik yuz berdi';
+    
+    if (typeof error === 'string') {
+      message = error;
+    } else if (error?.response?.data?.message) {
+      // Axios error
+      const backendMessage = error.response.data.message;
+      message = Array.isArray(backendMessage) 
+        ? backendMessage.join(', ') 
+        : backendMessage;
+    } else if (error?.message) {
+      message = error.message;
+    }
+    
+    sonnerToast.error(message);
+  },
 };

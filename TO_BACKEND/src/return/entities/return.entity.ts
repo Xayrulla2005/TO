@@ -8,7 +8,7 @@ import {
   OneToMany as OTM3,
 } from 'typeorm';
 import { ReturnItemEntity } from './return.item.entity';
-import { SaleEntity } from 'src/sale/entities/sale.entity';
+import { SaleEntity } from '../../sale/entities/sale.entity';
 
 export enum ReturnStatus {
   PENDING = 'PENDING',

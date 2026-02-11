@@ -1,14 +1,14 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { categoriesApi } from '@/features/categories/api/categories.api';
-import { useAuthStore } from '@/features/auth/model/auth.store';
-import { Button } from '@/shared/ui/Button';
-import { Card } from '@/shared/ui/Card';
+import { categoriesApi } from '../features/categories/api/categories.api';
+import { useAuthStore } from '../features/auth/model/auth.store';
+import { Button } from '../shared/ui/Button';
+import { Card } from '../shared/ui/Card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../shared/ui/Table';
 import { CategoryFormModal } from '../features/categories/api/ui/CategoriyFormModal';
-import { Modal } from '@/shared/ui/Modal';
-import { toast } from '@/shared/ui/Toast';
-import { LoadingSpinner } from '@/shared/ui/Loading';
+import { Modal } from '../shared/ui/Modal';
+import { toast } from '../shared/ui/Toast';
+import { LoadingSpinner } from '../shared/ui/Loading';
 import { Plus, Edit, Trash2, FolderOpen, AlertTriangle } from 'lucide-react';
 import { Category } from '../shared/types/categoriy';
 
@@ -52,12 +52,12 @@ export function CategoriesPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Categories</h1>
-          <p className="text-gray-500">Manage product categories</p>
+          <h1 className="text-2xl font-bold text-gray-900">Kategoriyalar</h1>
+          <p className="text-gray-500">Mahsulot kategoriyalarini boshqarish</p>
         </div>
         {isAdmin && (
           <Button leftIcon={<Plus size={18} />} onClick={handleCreate}>
-            New Category
+            Yangi kategoriya
           </Button>
         )}
       </div>
@@ -67,13 +67,13 @@ export function CategoriesPage() {
           <TableHeader>
             <TableRow>
               <TableHead className="w-16">Icon</TableHead>
-              <TableHead>Category Name</TableHead>
-              <TableHead>Products</TableHead>
+              <TableHead>Kategoriya nomi</TableHead>
+              <TableHead>Mahsulot</TableHead>
               {isAdmin && <TableHead className="text-right">Actions</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
-            {categories?.map((cat) => (
+            {categories?.map((cat: Category) => (
               <TableRow key={cat.id}>
                 <TableCell>
                   <div className="h-10 w-10 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600">
@@ -142,7 +142,7 @@ export function CategoriesPage() {
               isLoading={deleteMutation.isPending} 
               onClick={() => deletingId && deleteMutation.mutate(deletingId)}
             >
-              Delete Category
+              Kategoriyani ochirish
             </Button>
           </div>
         </div>

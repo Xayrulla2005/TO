@@ -142,8 +142,8 @@ export class ProductsService {
   const query = this.productRepository
     .createQueryBuilder('product')
     .leftJoinAndSelect('product.category', 'category')
-    .where('product.deleted_at IS NULL')
-    .orderBy('product.created_at', 'DESC');
+    .where('product.deletedAt IS NULL')
+    .orderBy('product.createdAt', 'DESC');
 
   if (search) {
     query.andWhere('product.name ILIKE :search', {
@@ -155,6 +155,7 @@ export class ProductsService {
     .skip((page - 1) * limit)
     .take(limit)
     .getManyAndCount();
+    
 
   return PaginatedResponseDto.create(products, total, page, limit);
 }

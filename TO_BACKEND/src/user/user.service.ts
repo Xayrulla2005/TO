@@ -1,17 +1,29 @@
-// ============================================================
-// src/users/users.service.ts
-// ============================================================
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
+
 import { UserEntity } from './entities/user.entity';
-import { CreateUserDto, UpdateUserDto, UserResponseDto } from './dto/create-user.dto';
+import {
+  CreateUserDto,
+  UpdateUserDto,
+  UserResponseDto,
+} from './dto/create-user.dto';
+import {
+  PaginationDto,
+  PaginatedResponseDto,
+} from '../common/dto/pagination.dto';
+
 import { AuditLogService } from '../audit-logs/audit-logs.service';
-import { AuditAction, AuditEntity } from '../audit-logs/entities/audit-log.entity';
-import { PaginationDto, PaginatedResponseDto } from '../common/dto/pagination.dto';
-import { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
-const newEmail = 'test@example.com';
+import {
+  AuditAction,
+  AuditEntity,
+} from '../audit-logs/entities/audit-log.entity';
+import { UserRole } from '../common/dto/roles.enum';
 
 @Injectable()
 export class UsersService {
@@ -21,8 +33,11 @@ export class UsersService {
     private readonly auditLogService: AuditLogService,
   ) {}
 
-  async findAll(pagination: PaginationDto): Promise<PaginatedResponseDto<UserResponseDto>> {
+  async findAll(
+    pagination: PaginationDto,
+  ): Promise<PaginatedResponseDto<UserResponseDto>> {
     const { page = 1, limit = 20 } = pagination;
+
     const [users, total] = await this.userRepository.findAndCount({
       order: { createdAt: 'DESC' },
       skip: (page - 1) * limit,
@@ -40,79 +55,94 @@ export class UsersService {
   }
 
   async create(dto: CreateUserDto, adminId: string): Promise<UserResponseDto> {
-    // Check uniqueness
-    const existingUsername = await this.userRepository.findOne({ where: { username: dto.username }, withDeleted: true });
-    if (existingUsername) throw new ConflictException('Username already exists');
+  // Phone bo'yicha tekshirish
+  const existingUser = await this.userRepository.findOne({
+    where: { phone: dto.phone },
+    withDeleted: true,
+  });
 
-    const existingEmail = await this.userRepository.findOne({ where: { email: dto.email }, withDeleted: true });
-    if (existingEmail) throw new ConflictException('Email already in use');
-
-    const hashedPassword = await bcrypt.hash(dto.password, 12);
-
-    const user = await this.userRepository.save(
-      this.userRepository.create({
-        username: dto.username,
-        email: dto.email,
-        password: hashedPassword,
-        firstName: dto.firstName || null,
-        lastName: dto.lastName || null,
-        role: dto.role || 'SALER' as any,
-        isActive: dto.isActive !== undefined ? dto.isActive : true,
-      }),
-    );
-
-    await this.auditLogService.log({
-      userId: adminId,
-      action: AuditAction.CREATED,
-      entity: AuditEntity.USER,
-      entityId: user.id,
-      afterSnapshot: { username: user.username, email: user.email, role: user.role },
-    });
-
-    return UserResponseDto.fromEntity(user);
+  if (existingUser) {
+    throw new ConflictException('Bu telefon raqami bilan foydalanuvchi mavjud');
   }
 
-  async update(id: string, dto: UpdateUserDto, adminId: string): Promise<UserResponseDto> {
-    const user = await this.userRepository.findOne({ where: { id } });
-    if (!user) throw new NotFoundException('User not found');
+  const hashedPassword = await bcrypt.hash(dto.password, 12);
 
-    const before = UserResponseDto.fromEntity(user);
+  const user = await this.userRepository.save(
+    this.userRepository.create({
+      fullName: dto.fullName, // fullName ni username sifatida saqlaymiz
+      phone: dto.phone,
+      password: hashedPassword,
+      role: dto.role || UserRole.SALER,
+      isActive: dto.isActive ?? true,
+    }),
+  );
 
-    if (dto.username && dto.username !== user.username) {
-      const existing = await this.userRepository.findOne({ where: { username: dto.username }, withDeleted: true });
-      if (existing) throw new ConflictException('Username already exists');
-    }
+  await this.auditLogService.log({
+    userId: adminId,
+    action: AuditAction.CREATED,
+    entity: AuditEntity.USER,
+    entityId: user.id,
+    afterSnapshot: {
+      fullName: user.fullName,
+      phone: user.phone,
+      role: user.role,
+    },
+  });
 
-    if (dto.email && dto.email !== user.email) {
-      const existing = await this.userRepository.findOne({ where: { email: dto.email }, withDeleted: true });
-      if (existing) throw new ConflictException('Email already in use');
-    }
+  return UserResponseDto.fromEntity(user);
+}
 
-    await this.userRepository.update(id, {
-  email: newEmail,
-});
+  async update(
+  id: string,
+  dto: UpdateUserDto,
+  adminId: string,
+): Promise<UserResponseDto> {
+  const user = await this.userRepository.findOne({ where: { id } });
+  if (!user) throw new NotFoundException('User not found');
 
-    const updates: QueryDeepPartialEntity<UserEntity> = {
-  email: newEmail,
-  isActive: false,
-  lastLoginAt: new Date(),
-};
-    
-    await this.userRepository.update(id, updates);
-    const updated = await this.userRepository.findOne({ where: { id } });
-    if (!updated) throw new NotFoundException('User not found after update');
+  const before = UserResponseDto.fromEntity(user);
 
-    await this.auditLogService.log({
-      userId: adminId,
-      action: AuditAction.UPDATED,
-      entity: AuditEntity.USER,
-      entityId: id,
-      beforeSnapshot: before as unknown as Record<string, unknown>,
-      afterSnapshot: UserResponseDto.fromEntity(updated) as unknown as Record<string, unknown>,
+  // Phone unique bo'lgani uchun tekshirish
+  if (dto.phone && dto.phone !== user.phone) {
+    const existingUser = await this.userRepository.findOne({
+      where: { phone: dto.phone },
+      withDeleted: true,
     });
 
-    return UserResponseDto.fromEntity(updated);
+    if (existingUser) {
+      throw new ConflictException('Bu telefon raqami band');
+    }
   }
+
+  // Password ni alohida qayta ishlash
+  const updateData: any = {};
+  
+  if (dto.fullName) updateData.username = dto.fullName;
+  if (dto.phone) updateData.phone = dto.phone;
+  if (dto.role) updateData.role = dto.role;
+  if (dto.isActive !== undefined) updateData.isActive = dto.isActive;
+  
+  // Password update (ixtiyoriy)
+  if (dto.password) {
+    updateData.password = await bcrypt.hash(dto.password, 12);
+  }
+
+  await this.userRepository.update(id, updateData);
+
+  const updated = await this.userRepository.findOne({ where: { id } });
+  if (!updated) throw new NotFoundException('User not found after update');
+
+  await this.auditLogService.log({
+    userId: adminId,
+    action: AuditAction.UPDATED,
+    entity: AuditEntity.USER,
+    entityId: id,
+    beforeSnapshot: before as any,
+    afterSnapshot: UserResponseDto.fromEntity(updated) as any,
+  });
+
+  return UserResponseDto.fromEntity(updated);
+}
 
   async softDelete(id: string, adminId: string): Promise<void> {
     const user = await this.userRepository.findOne({ where: { id } });
@@ -125,16 +155,21 @@ export class UsersService {
       action: AuditAction.DELETED,
       entity: AuditEntity.USER,
       entityId: id,
-      beforeSnapshot: UserResponseDto.fromEntity(user) as unknown as Record<string, unknown>,
+      beforeSnapshot: UserResponseDto.fromEntity(user) as any,
     });
   }
 
   async restore(id: string, adminId: string): Promise<UserResponseDto> {
-    const user = await this.userRepository.findOne({ where: { id }, withDeleted: true });
+    const user = await this.userRepository.findOne({
+      where: { id },
+      withDeleted: true,
+    });
+
     if (!user) throw new NotFoundException('User not found');
     if (!user.deletedAt) throw new ConflictException('User is not deleted');
 
     await this.userRepository.restore(id);
+
     const restored = await this.userRepository.findOne({ where: { id } });
     if (!restored) throw new NotFoundException('Restore failed');
 
@@ -148,4 +183,3 @@ export class UsersService {
     return UserResponseDto.fromEntity(restored);
   }
 }
-

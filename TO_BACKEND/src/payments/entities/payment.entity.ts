@@ -22,7 +22,13 @@ export class PaymentEntity {
   @Column({ type: 'numeric', precision: 14, scale: 2 })
   amount!: number;
 
-  @Column({ type: 'varchar', length: 20 })
+  @Column({
+    type: 'enum',
+    enum: PaymentMethod,
+    // agar database da allaqachon varchar bo'lsa:
+    // type: 'varchar',
+    // length: 20,
+  })
   method!: PaymentMethod;
 
   @Column({ type: 'text', nullable: true })
@@ -32,7 +38,7 @@ export class PaymentEntity {
   createdAt!: Date;
 
   // Relations
-  @ManyToOne(() => SaleEntity, (sale) => sale.payments)
+  @ManyToOne(() => SaleEntity, (sale) => sale.payments, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'sale_id' })
   sale!: SaleEntity;
 

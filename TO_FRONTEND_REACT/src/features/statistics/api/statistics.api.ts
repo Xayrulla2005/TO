@@ -1,4 +1,4 @@
-import { api } from '@/shared/lib/axios';
+import { api } from '../../../shared/lib/axios';
 import { DashboardStats, StatisticsSummary, TimeRange } from '@/shared/types/statistics';
 
 export const statisticsApi = {

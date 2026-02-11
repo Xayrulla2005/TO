@@ -1,16 +1,21 @@
+// src/auth/dto/login.auth.dto.ts
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsNotEmpty, Length } from 'class-validator';
+import { IsNotEmpty, IsString } from 'class-validator';
 
 export class LoginDto {
-  @ApiProperty({ example: 'admin', description: 'Username' })
+  @ApiProperty({ 
+    description: 'To\'liq ism (Login uchun)', 
+    example: 'Xayrulla Aliyev' 
+  })
   @IsString()
   @IsNotEmpty()
-  @Length(3, 100)
-  username!: string;
+  fullName!: string;
 
-  @ApiProperty({ example: 'secureP@ss123', description: 'Password' })
+  @ApiProperty({ 
+    description: 'Parol',
+    example: 'Xayrulla2005+' 
+  })
   @IsString()
   @IsNotEmpty()
-  @Length(6, 255)
   password!: string;
 }

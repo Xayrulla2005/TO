@@ -1,6 +1,6 @@
 import { NestFactory } from "@nestjs/core";
 import { AppModule } from "./app.module";
-import { ValidationPipe } from "@nestjs/common";
+import { BadRequestException, ValidationPipe } from "@nestjs/common";
 import { SwaggerModule, DocumentBuilder } from "@nestjs/swagger";
 import { GlobalExceptionFilter } from "./common/filters/http.exception.filter";
 import { TraceIdInterceptor } from "./common/interceptors/trace.id.interceptor";
@@ -24,14 +24,21 @@ async function bootstrap(): Promise<void> {
   });
 
   const port = parseInt(process.env.PORT || "3000", 10);
-  const corsOrigin = process.env.CORS_ORIGIN || "http://localhost:8080";
+  const corsOrigins = (process.env.CORS_ORIGIN || "http://localhost:5173")
+  .split(",")
+  .map((x) => x.trim());
+
+app.enableCors({
+  origin: corsOrigins,
+  credentials: true,
+});
 
   // ── Security Headers (Helmet) ───────────────────────────
   app.use(helmet());
 
   // ── CORS ────────────────────────────────────────────────
   app.enableCors({
-    origin: corsOrigin,
+    origin: corsOrigins,
     methods: (process.env.CORS_METHODS || "GET,POST,PUT,PATCH,DELETE").split(
       ",",
     ),
@@ -53,13 +60,20 @@ async function bootstrap(): Promise<void> {
 
   // ── Global Validation Pipe ──────────────────────────────
   app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true, // Strip unknown properties
-      forbidNonWhitelisted: true, // Reject unknown properties
-      transform: true, // Enable class-transformer
-      transformOptions: { enableImplicitConversion: true },
-    }),
-  );
+  new ValidationPipe({
+    whitelist: true,
+    forbidNonWhitelisted: true,
+    transform: true,
+    transformOptions: {
+      enableImplicitConversion: true,
+    },
+    // ERROR'larni batafsil ko'rsatish
+    exceptionFactory: (errors) => {
+      console.error('Validation errors:', JSON.stringify(errors, null, 2));
+      return new BadRequestException(errors);
+    },
+  }),
+);
 
   // ── Global Exception Filter ─────────────────────────────
   app.useGlobalFilters(new GlobalExceptionFilter());

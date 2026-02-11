@@ -1,13 +1,17 @@
-import { Category } from './categoriy';
+import { ReactNode } from 'react';
+import { Category } from './categoriy'
 
 export interface Product {
+  stockQty: ReactNode;
   id: string;
   name: string;
   categoryId: string;
   category?: Category;
   purchasePrice: number;
   salePrice: number;
-  stockQty: number;
+  stockQuantity: number;
+minStockLimit: number;
+isLowStock: boolean;
   imageUrl?: string;
   createdAt: string;
   updatedAt: string;

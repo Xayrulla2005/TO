@@ -11,6 +11,7 @@ import { productsApi } from "../product.api";
 import { categoriesApi } from "@/features/categories/api/categories.api";
 import { toast } from "@/shared/ui/Toast";
 import { ImageUpload } from "./ImageUpload";
+import { Category } from "@/shared/types/categoriy";
 
 const schema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -150,11 +151,11 @@ export function ProductFormModal({ isOpen, onClose, productToEdit }: Props) {
                 className="flex h-10 w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
               >
                 <option value="">Select a category</option>
-                {categories?.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
+                {(categories || []).map((cat: Category) => (
+  <option key={cat.id} value={cat.id}>
+    {cat.name}
+  </option>
+))}
               </select>
 
               {errors.categoryId && (

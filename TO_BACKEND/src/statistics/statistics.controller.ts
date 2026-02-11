@@ -24,11 +24,77 @@ import { StatisticsService, StatisticsPeriod } from './statistics.service';
 export class StatisticsController {
   constructor(private readonly statisticsService: StatisticsService) {}
 
+ // ✅ YANGI ENDPOINT - Dashboard uchun
   @Get('dashboard')
-  @ApiOperation({ summary: 'Get comprehensive dashboard summary (ADMIN)' })
-  async getDashboard() {
-    return this.statisticsService.getDashboardSummary();
+  @ApiOperation({ summary: 'Get dashboard stats for a specific date' })
+  @ApiQuery({ name: 'date', required: false, description: 'Date in YYYY-MM-DD format' })
+  async getDashboardByDate(@Query('date') date?: string) {
+    console.log('📊 Dashboard API called with date:', date);
+    return this.statisticsService.getDashboardByDate(date);
   }
+
+  // ✅ YANGI ENDPOINT - Statistics summary uchun
+  @Get('summary')
+  @ApiOperation({ summary: 'Get statistics summary for time range' })
+  @ApiQuery({ name: 'range', enum: ['daily', 'weekly', 'monthly', 'yearly'] })
+  async getSummary(
+    @Query('range') range: 'daily' | 'weekly' | 'monthly' | 'yearly',
+  ) {
+    console.log('📊 Summary API called with range:', range);
+    return this.statisticsService.getSummaryByRange(range);
+  }
+
+
+//   @Get('dashboard')
+// @ApiOperation({ summary: 'Get dashboard stats for a specific date' })
+// @ApiQuery({ name: 'date', required: false, description: 'Date in YYYY-MM-DD format' })
+// async getDashboardByDate(@Query('date') date?: string) {
+//   const targetDate = date ? new Date(date) : new Date();
+  
+//   // Get today's stats
+//   const todayStats = await this.statisticsService.getStatistics(
+//     StatisticsPeriod.DAILY,
+//     targetDate.toISOString(),
+//   );
+
+//   // Get recent sales
+//   const recentSales = await this.statisticsService.getRecentSales(targetDate, 20);
+
+//   // Get low stock products
+//   const lowStock = await this.statisticsService.getLowStockProducts(10);
+
+//   // Get best selling products for today
+//   const bestSelling = await this.statisticsService.getBestSellingProducts(
+//     targetDate,
+//     targetDate,
+//     10,
+//   );
+
+//   return {
+//     todayRevenue: todayStats.totalRevenue,
+//     grossProfit: todayStats.grossProfit,
+//     cashTotal: todayStats.cashAmount,
+//     debtTotal: todayStats.debtAmount,
+//     recentSales: recentSales.map(sale => ({
+//       id: sale.id,
+//       createdAt: sale.createdAt,
+//       customerName: sale.customerName || null,
+//       paymentMethod: sale.paymentMethod,
+//       total: Number(sale.grandTotal),
+//     })),
+//     lowStockProducts: lowStock.map(p => ({
+//       id: p.id,
+//       name: p.name,
+//       stockQty: Number(p.stockQuantity),
+//     })),
+//     bestSellingProducts: bestSelling.map(p => ({
+//       id: p.productId,
+//       name: p.productName,
+//       qty: p.totalQuantitySold,
+//       total: p.totalRevenue,
+//     })),
+//   };
+// }
 
   @Get()
   @ApiOperation({ summary: 'Get statistics for a specific period (ADMIN)' })

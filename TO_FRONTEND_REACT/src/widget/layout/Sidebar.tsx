@@ -3,21 +3,23 @@ import { useAuthStore } from '@/features/auth/model/auth.store';
 import { cn } from '@/shared/lib/utils';
 import { 
   LayoutDashboard, ShoppingCart, Package, Tags, 
-  Users, BarChart3, FileText, Settings, LogOut 
+  Users, BarChart3, FileText, Settings, LogOut, 
+  DollarSign
 } from 'lucide-react';
 
 export function Sidebar({ isMobile = false }: { isMobile?: boolean }) {
   const { user, logout } = useAuthStore();
   
   const links = [
-    { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', roles: ['ADMIN', 'SALER'] },
-    { to: '/sales', icon: ShoppingCart, label: 'New Sale (POS)', roles: ['ADMIN', 'SALER'] },
-    { to: '/products', icon: Package, label: 'Products', roles: ['ADMIN', 'SALER'] },
-    { to: '/categories', icon: Tags, label: 'Categories', roles: ['ADMIN', 'SALER'] },
-    { to: '/customers', icon: Users, label: 'Customers', roles: ['ADMIN', 'SALER'] },
-    { to: '/statistics', icon: BarChart3, label: 'Statistics', roles: ['ADMIN', 'SALER'] },
-    { to: '/audit-logs', icon: FileText, label: 'Audit Logs', roles: ['ADMIN'] },
-    { to: '/settings', icon: Settings, label: 'Settings', roles: ['ADMIN'] },
+    { to: '/dashboard', icon: LayoutDashboard, label: 'Boshsahifa', roles: ['ADMIN', 'SALER'] },
+    { to: '/sales', icon: ShoppingCart, label: 'Yangi Savdo (POS)', roles: ['ADMIN', 'SALER'] },
+    { to: '/products', icon: Package, label: 'Mahsulotlar', roles: ['ADMIN', 'SALER'] },
+    { to: '/categories', icon: Tags, label: 'Kategoriyalar', roles: ['ADMIN', 'SALER'] },
+    { to: '/customers', icon: Users, label: 'Mijozlar', roles: ['ADMIN', 'SALER'] },
+    { to: '/statistics', icon: BarChart3, label: 'Statistika', roles: ['ADMIN', 'SALER'] },
+    { to: '/audit-logs', icon: FileText, label: 'Audit Jurnali', roles: ['ADMIN'] },
+    { to: '/settings', icon: Settings, label: 'Sozlamalar', roles: ['ADMIN'] },
+    { to: '/debts', icon: DollarSign, label: 'Qarzlar' }
   ];
 
   const content = (
@@ -27,7 +29,7 @@ export function Sidebar({ isMobile = false }: { isMobile?: boolean }) {
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-white font-bold">
             E
           </div>
-          <span className="text-xl font-bold text-gray-900">ERP System</span>
+          <span className="text-xl font-bold text-gray-900">ERP Tizimi</span>
         </div>
       )}
 
@@ -61,7 +63,7 @@ export function Sidebar({ isMobile = false }: { isMobile?: boolean }) {
           className="flex w-full items-center gap-3 rounded-lg px-4 py-2.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-50"
         >
           <LogOut size={20} />
-          Logout
+          Chiqish
         </button>
       </div>
     </div>

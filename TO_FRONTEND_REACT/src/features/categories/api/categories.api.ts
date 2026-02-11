@@ -3,8 +3,10 @@ import { Category, CreateCategoryDto, UpdateCategoryDto } from '../../../shared/
 
 export const categoriesApi = {
   getAll: async () => {
-    const { data } = await api.get<Category[]>('/categories');
-    return data;
+    const { data } = await api.get('/categories');
+    
+    // Backend paginated response qaytarsa (products bilan bir xil):
+    return data.data; // Array qaytaradi
   },
   create: async (payload: CreateCategoryDto) => {
     const { data } = await api.post<Category>('/categories', payload);

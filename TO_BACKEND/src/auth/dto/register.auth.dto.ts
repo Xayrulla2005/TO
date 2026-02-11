@@ -1,39 +1,44 @@
+// src/auth/dto/register.auth.dto.ts
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsNotEmpty, IsEmail, Length, IsOptional, IsEnum } from 'class-validator';
+import {
+  IsBoolean,
+  IsEnum,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  Length,
+  Matches,
+} from 'class-validator';
 import { UserRole } from '../../common/dto/roles.enum';
 
 export class RegisterDto {
-  @ApiProperty({ example: 'john_doe' })
+  @ApiProperty({ description: 'To\'liq ism' })
   @IsString()
   @IsNotEmpty()
-  @Length(3, 100)
-  username!: string;
+  @Length(3, 150)
+  fullName!: string;
 
-  @ApiProperty({ example: 'john@example.com' })
-  @IsEmail()
-  @IsNotEmpty()
-  email!: string;
-
-  @ApiProperty({ example: 'secureP@ss123', description: 'Min 8 chars, must contain uppercase, lowercase, number' })
+  @ApiProperty({ description: 'Telefon raqami', example: '+998901234567' })
   @IsString()
   @IsNotEmpty()
-  @Length(8, 255)
+  @Matches(/^\+?998\d{9}$/, {
+    message: 'Telefon raqami noto\'g\'ri formatda',
+  })
+  phone!: string;
+
+  @ApiProperty({ description: 'Parol' })
+  @IsString()
+  @IsNotEmpty()
+  @Length(6, 255)
   password!: string;
-
-  @ApiPropertyOptional({ example: 'John' })
-  @IsOptional()
-  @IsString()
-  @Length(1, 100)
-  firstName?: string;
-
-  @ApiPropertyOptional({ example: 'Doe' })
-  @IsOptional()
-  @IsString()
-  @Length(1, 100)
-  lastName?: string;
 
   @ApiPropertyOptional({ enum: UserRole, default: UserRole.SALER })
   @IsOptional()
   @IsEnum(UserRole)
-  role?: UserRole = UserRole.SALER;
+  role?: UserRole;
+
+  @ApiPropertyOptional({ default: true })
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
 }
