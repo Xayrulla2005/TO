@@ -18,7 +18,7 @@ interface NavItem {
 
 interface SidebarNavLinksProps {
   isAdmin?: boolean;
-  onNavigate?: () => void; // Optional callback for mobile drawer close
+  onNavigate?: () => void;
 }
 
 export function SidebarNavLinks({
@@ -30,6 +30,7 @@ export function SidebarNavLinks({
       to: "/dashboard",
       icon: <LayoutDashboard size={20} />,
       label: "Bosh sahifa",
+      adminOnly: true, // ✅ SALER ko'rmaydi
     },
     {
       to: "/sales",
@@ -40,11 +41,13 @@ export function SidebarNavLinks({
       to: "/products",
       icon: <Package size={20} />,
       label: "Mahsulotlar",
+      adminOnly: true, // ✅ SALER ko'rmaydi
     },
     {
       to: "/categories",
       icon: <FolderTree size={20} />,
       label: "Kategoriyalar",
+      adminOnly: true, // ✅ SALER ko'rmaydi
     },
     {
       to: "/customers",
@@ -55,6 +58,7 @@ export function SidebarNavLinks({
       to: "/statistics",
       icon: <BarChart3 size={20} />,
       label: "Statistika",
+      adminOnly: true, // ✅ SALER ko'rmaydi
     },
     {
       to: "/audit-logs",
@@ -63,9 +67,10 @@ export function SidebarNavLinks({
       adminOnly: true,
     },
     {
-      to: "users",
+      to: "/users", // ✅ TUZATILDI: "users" → "/users"
       label: "Foydalanuvchilar",
       icon: <Users size={20} />,
+      adminOnly: true, // ✅ SALER ko'rmaydi
     },
   ];
 

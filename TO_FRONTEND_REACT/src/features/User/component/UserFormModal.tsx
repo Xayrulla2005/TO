@@ -25,7 +25,7 @@ export const UserFormModal = ({
     isActive: true,
   });
 
-  const [showPassword, setShowPassword] = useState(false); // ✅ YUQORIGA KO'TARILDI
+  const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -47,32 +47,45 @@ export const UserFormModal = ({
     }
   }, [user, isOpen]);
 
+  // ✅ BUG 1 FIX: isOpen false bo'lsa, hech narsa render qilinmaydi
+  if (!isOpen) return null;
+
   const handleSubmit = (e: React.FormEvent) => {
-  e.preventDefault();
+    e.preventDefault();
 
-  // ✅ Telefon validatsiyasi
-  const phoneRegex = /^\+998\d{9}$/;
-  if (!phoneRegex.test(formData.phone)) {
-    alert('Telefon raqami noto\'g\'ri formatda!\nTo\'g\'ri format: +998901234567');
-    return;
-  }
+    // Telefon validatsiyasi
+    const phoneRegex = /^\+998\d{9}$/;
+    if (!phoneRegex.test(formData.phone)) {
+      alert("Telefon raqami noto'g'ri formatda!\nTo'g'ri format: +998901234567");
+      return;
+    }
 
-  // ✅ Parol validatsiyasi (yangi user uchun)
-  if (!user && formData.password.length < 6) {
-    alert('Parol kamida 6 ta belgidan iborat bo\'lishi kerak!');
-    return;
-  }
+    // Parol validatsiyasi (yangi user uchun)
+    if (!user && formData.password.length < 6) {
+      alert("Parol kamida 6 ta belgidan iborat bo'lishi kerak!");
+      return;
+    }
 
-  if (user) {
-    const { password, ...updateData } = formData;
-    onSubmit(updateData);
-  } else {
-    onSubmit(formData);
-  }
-};
+    if (user) {
+      const { password, ...updateData } = formData;
+      onSubmit(updateData);
+    } else {
+      onSubmit(formData);
+    }
+  };
+
+  // ✅ BUG 2 FIX: Backdrop bosilganda modal yopiladi
+  const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.target === e.currentTarget) {
+      onClose();
+    }
+  };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+      onClick={handleBackdropClick}
+    >
       <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
         <div className="px-6 py-4 border-b border-gray-200">
           <div className="flex items-center justify-between">
@@ -137,10 +150,7 @@ export const UserFormModal = ({
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               value={formData.phone}
               onChange={(e) => {
-                // ✅ Faqat raqamlarni qabul qilish
                 let value = e.target.value.replace(/[^\d+]/g, "");
-
-                // ✅ Agar +998 yo'q bo'lsa, avtomatik qo'shish
                 if (value && !value.startsWith("+998")) {
                   if (value.startsWith("998")) {
                     value = "+" + value;
@@ -148,8 +158,6 @@ export const UserFormModal = ({
                     value = "+998" + value;
                   }
                 }
-
-                // ✅ Maksimal uzunlik: +998 + 9 raqam = 13
                 if (value.length <= 13) {
                   setFormData({ ...formData, phone: value });
                 }
@@ -158,7 +166,6 @@ export const UserFormModal = ({
               maxLength={13}
             />
             <p className="text-xs text-gray-500 mt-1">Format: +998XXXXXXXXX</p>
-            {/* Validation error ko'rsatish */}
           </div>
 
           {!user && (
@@ -166,7 +173,6 @@ export const UserFormModal = ({
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Parol
               </label>
-
               <div className="relative">
                 <input
                   type={showPassword ? "text" : "password"}
@@ -179,7 +185,6 @@ export const UserFormModal = ({
                     setFormData({ ...formData, password: e.target.value })
                   }
                 />
-
                 <button
                   type="button"
                   onClick={() => setShowPassword((v) => !v)}

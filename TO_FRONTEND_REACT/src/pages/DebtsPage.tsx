@@ -10,18 +10,31 @@ import { Search, DollarSign, User } from 'lucide-react';
 import { format } from 'date-fns';
 import { PayDebtModal } from '../features/debts/companent/PayDeptModal';
 
+// ✅ Debt turi
+interface Debt {
+  id: string;
+  customerName: string;
+  customerPhone: string;
+  totalAmount: number;
+  paidAmount: number;
+  remainingAmount: number;
+  status: string;
+  createdAt: string;
+}
+
 export function DebtsPage() {
   const [search, setSearch] = useState('');
   const [selectedDebt, setSelectedDebt] = useState<string | null>(null);
   
-  const { data: debts = [], isLoading } = useDebts();
+  // ✅ Type qo'shildi
+  const { data: debts = [] as Debt[], isLoading } = useDebts();
 
-  const filteredDebts = debts.filter((debt) =>
+  const filteredDebts = (debts as Debt[]).filter((debt) =>
     debt.customerName.toLowerCase().includes(search.toLowerCase()) ||
     debt.customerPhone.includes(search)
   );
 
-  const totalDebt = debts.reduce((sum, debt) => sum + debt.remainingAmount, 0);
+  const totalDebt = (debts as Debt[]).reduce((sum, debt) => sum + debt.remainingAmount, 0);
 
   if (isLoading) {
     return (
@@ -99,7 +112,7 @@ export function DebtsPage() {
                 </TableCell>
                 <TableCell>
                   <Badge variant={debt.status === 'PAID' ? 'success' : 'warning'}>
-                    {debt.status === 'PAID' ? 'TO\'LIQ' : 'QISMAN'}
+                    {debt.status === 'PAID' ? "TO'LIQ" : 'QISMAN'}
                   </Badge>
                 </TableCell>
                 <TableCell className="text-gray-500">
@@ -129,7 +142,6 @@ export function DebtsPage() {
         </Table>
       </Card>
 
-      {/* Pay Debt Modal */}
       {selectedDebt && (
         <PayDebtModal
           debtId={selectedDebt}

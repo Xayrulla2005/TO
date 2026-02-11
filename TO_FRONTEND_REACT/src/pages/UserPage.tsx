@@ -15,16 +15,12 @@ export const UsersPage = () => {
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // ✅ Debug loglar
-  console.log('🔍 UsersPage render - isModalOpen:', isModalOpen);
-
   const { data: users, isLoading } = useUsers();
   const createUser = useCreateUser();
   const updateUser = useUpdateUser();
   const deleteUser = useDeleteUser();
 
   const filteredUsers = useMemo(() => {
-    // users array ekanligini tekshirish
     if (!Array.isArray(users)) return [];
     if (!searchQuery.trim()) return users;
 
@@ -58,9 +54,10 @@ export const UsersPage = () => {
       } else {
         await createUser.mutateAsync(data);
       }
+      // ✅ BUG 2 FIX: Muvaffaqiyatli bo'lganda modal yopiladi
       handleCloseModal();
     } catch (error) {
-      // Error handled in hooks
+      // ✅ Xato bo'lsa modal ochiq qoladi, faqat log qilinadi
       console.error('Submit error:', error);
     }
   };
@@ -142,7 +139,7 @@ export const UsersPage = () => {
         </div>
       </div>
 
-      {/* Modal */}
+      {/* ✅ Modal faqat isModalOpen=true bo'lganda render qilinadi */}
       <UserFormModal
         isOpen={isModalOpen}
         onClose={handleCloseModal}

@@ -1,3 +1,4 @@
+// src/app/App.tsx
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ToastContainer } from '../shared/ui/Toast';
@@ -11,7 +12,7 @@ import { ProductsPage } from '../pages/ProductsPage';
 import { CategoriesPage } from '../pages/CategoriesPage';
 import { StatisticsPage } from '../pages/StatisticsPage';
 import { AuditLogsPage } from '../pages/AuditLogsPage';
-import { CustomersPage } from '../pages/CustomersPage'; // Qo'shing
+import { CustomersPage } from '../pages/CustomersPage';
 import { DebtsPage } from '@/pages/DebtsPage';
 
 const queryClient = new QueryClient({
@@ -48,7 +49,7 @@ export default function App() {
           {/* Admin only routes */}
           <Route element={<ProtectedRoute allowedRoles={['ADMIN']} />}>
             <Route element={<AppLayout />}>
-              <Route path="/users" element={<UsersPage />} />
+              <Route path="/users" element={<UsersPage />} />  {/* ✅ TO'G'RI */}
               <Route path="/audit-logs" element={<AuditLogsPage />} />
             </Route>
           </Route>

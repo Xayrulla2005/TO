@@ -25,7 +25,7 @@ export function CustomersPage() {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("CASH");
   const [note, setNote] = useState("");
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ["debts", search],
     queryFn: () =>
       debtsApi.getAll({
@@ -33,12 +33,19 @@ export function CustomersPage() {
         limit: 50,
         search: search.trim() ? search.trim() : undefined,
       }),
+    // ✅ 403 xatosida qayta urinmaslik
+    retry: (failureCount, err: any) => {
+      if (err?.response?.status === 403) return false;
+      return failureCount < 2;
+    },
   });
+
+  // ✅ 403 xatosini tekshirish
+  const is403 = (error as any)?.response?.status === 403;
 
   const debts = data?.data ?? [];
 
   const filteredDebts = useMemo(() => {
-    // backend search ham bor, lekin frontendda ham qo‘shimcha filter
     if (!search.trim()) return debts;
     const s = search.trim().toLowerCase();
     return debts.filter(
@@ -51,13 +58,10 @@ export function CustomersPage() {
   const payMutation = useMutation({
     mutationFn: async () => {
       if (!selectedDebt) throw new Error("Debt not selected");
-
       const amount = Number(payAmount);
-
       if (!amount || amount <= 0) {
-        throw new Error("To‘lov summasi noto‘g‘ri");
+        throw new Error("To'lov summasi noto'g'ri");
       }
-
       return debtsApi.makePayment(selectedDebt.id, {
         amount,
         paymentMethod,
@@ -65,16 +69,15 @@ export function CustomersPage() {
       });
     },
     onSuccess: async () => {
-      toast.success("To‘lov qabul qilindi");
+      toast.success("To'lov qabul qilindi");
       setSelectedDebt(null);
       setPayAmount("");
       setPaymentMethod("CASH");
       setNote("");
-
       await qc.invalidateQueries({ queryKey: ["debts"] });
     },
     onError: (e: any) => {
-      toast.error(e?.message || "To‘lovda xatolik");
+      toast.error(e?.message || "To'lovda xatolik");
     },
   });
 
@@ -90,7 +93,7 @@ export function CustomersPage() {
 
         <div className="w-full md:w-80">
           <Input
-            placeholder="Ism yoki telefon bo‘yicha qidirish..."
+            placeholder="Ism yoki telefon bo'yicha qidirish..."
             icon={<Search size={18} />}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -100,11 +103,22 @@ export function CustomersPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Qarzdorlar ro‘yxati</CardTitle>
+          <CardTitle>Qarzdorlar ro'yxati</CardTitle>
         </CardHeader>
 
         <CardContent className="p-0">
-          {isLoading ? (
+          {/* ✅ 403 xatosi — backend ruxsat bermayapti */}
+          {is403 ? (
+            <div className="p-12 text-center">
+              <Users size={48} className="mx-auto mb-4 text-gray-300" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">
+                Ruxsat yo'q
+              </h3>
+              <p className="text-gray-500">
+                Qarzlarni ko'rish uchun admin bilan bog'laning.
+              </p>
+            </div>
+          ) : isLoading ? (
             <div className="p-8 text-gray-500">Yuklanmoqda...</div>
           ) : filteredDebts.length === 0 ? (
             <div className="p-12 text-center">
@@ -131,12 +145,10 @@ export function CustomersPage() {
                       <div className="font-semibold text-gray-900">
                         {d.debtorName}
                       </div>
-
                       <div className="text-sm text-gray-500 flex items-center gap-2">
                         <Phone size={16} />
                         {d.debtorPhone}
                       </div>
-
                       <div className="text-sm text-gray-500">
                         Umumiy:{" "}
                         <span className="font-medium text-gray-800">
@@ -148,7 +160,6 @@ export function CustomersPage() {
                           {formatCurrency(remaining)}
                         </span>
                       </div>
-
                       <div className="text-xs text-gray-400">
                         Status: {d.status}
                       </div>
@@ -159,12 +170,12 @@ export function CustomersPage() {
                         disabled={remaining <= 0}
                         onClick={() => {
                           setSelectedDebt(d);
-                          setPayAmount(String(Math.min(remaining, remaining)));
+                          setPayAmount(String(remaining));
                           setPaymentMethod("CASH");
                           setNote("");
                         }}
                       >
-                        To‘lash
+                        To'lash
                       </Button>
                     </div>
                   </div>
@@ -179,7 +190,7 @@ export function CustomersPage() {
       <Modal
         isOpen={!!selectedDebt}
         onClose={() => setSelectedDebt(null)}
-        title="Qarz to‘lash"
+        title="Qarz to'lash"
       >
         {selectedDebt && (
           <div className="space-y-4">
@@ -196,7 +207,7 @@ export function CustomersPage() {
             </div>
 
             <Input
-              label="To‘lov summasi"
+              label="To'lov summasi"
               type="number"
               value={payAmount}
               onChange={(e) => setPayAmount(e.target.value)}
@@ -204,9 +215,8 @@ export function CustomersPage() {
 
             <div className="space-y-2">
               <div className="text-sm font-medium text-gray-700">
-                To‘lov turi
+                To'lov turi
               </div>
-
               <div className="flex gap-2">
                 <Button
                   variant={paymentMethod === "CASH" ? "primary" : "secondary"}
@@ -215,7 +225,6 @@ export function CustomersPage() {
                 >
                   Naqd
                 </Button>
-
                 <Button
                   variant={paymentMethod === "CARD" ? "primary" : "secondary"}
                   onClick={() => setPaymentMethod("CARD")}
@@ -240,13 +249,12 @@ export function CustomersPage() {
               >
                 Bekor qilish
               </Button>
-
               <Button
                 onClick={() => payMutation.mutate()}
                 disabled={payMutation.isPending}
                 type="button"
               >
-                {payMutation.isPending ? "Yuborilmoqda..." : "To‘lovni saqlash"}
+                {payMutation.isPending ? "Yuborilmoqda..." : "To'lovni saqlash"}
               </Button>
             </div>
           </div>

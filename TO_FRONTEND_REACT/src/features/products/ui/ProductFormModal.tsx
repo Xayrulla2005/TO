@@ -7,7 +7,7 @@ import { Input } from "@/shared/ui/Input";
 import { Button } from "@/shared/ui/Button";
 import { Product } from "@/shared/types/product";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { productsApi } from "../product.api";
+import { productsApi } from "../api/product.api";
 import { categoriesApi } from "@/features/categories/api/categories.api";
 import { toast } from "@/shared/ui/Toast";
 import { ImageUpload } from "./ImageUpload";
@@ -70,9 +70,9 @@ export function ProductFormModal({ isOpen, onClose, productToEdit }: Props) {
       reset({
         name: productToEdit.name,
         categoryId: productToEdit.categoryId,
-        purchasePrice: productToEdit.purchasePrice,
-        salePrice: productToEdit.salePrice,
-        stockQty: productToEdit.stockQty,
+        purchasePrice: Number(productToEdit.purchasePrice),
+        salePrice: Number(productToEdit.salePrice),
+        stockQty: Number(productToEdit.stockQty),
         image: undefined,
       });
     } else {
@@ -112,7 +112,7 @@ export function ProductFormModal({ isOpen, onClose, productToEdit }: Props) {
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={productToEdit ? "Edit Product" : "New Product"}
+      title={productToEdit ? "Mahsulotni tahrirlash" : "Yangi mahsulot"}
       size="lg"
     >
       <form
@@ -136,26 +136,26 @@ export function ProductFormModal({ isOpen, onClose, productToEdit }: Props) {
 
           <div className="flex-1 space-y-4">
             <Input
-              label="Product Name"
+              label="Mahsulot nomi"
               {...register("name")}
               error={errors.name?.message}
             />
 
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-gray-700">
-                Category
+                Kategoriya
               </label>
 
               <select
                 {...register("categoryId")}
                 className="flex h-10 w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
               >
-                <option value="">Select a category</option>
+                <option value="">Kategoriya tanlash</option>
                 {(categories || []).map((cat: Category) => (
-  <option key={cat.id} value={cat.id}>
-    {cat.name}
-  </option>
-))}
+                  <option key={cat.id} value={cat.id}>
+                    {cat.name}
+                  </option>
+                ))}
               </select>
 
               {errors.categoryId && (
@@ -167,25 +167,25 @@ export function ProductFormModal({ isOpen, onClose, productToEdit }: Props) {
 
             <div className="grid grid-cols-2 gap-4">
               <Input
-                label="Purchase Price"
+                label="Sotib olish narxi"
                 type="number"
                 {...register("purchasePrice")}
-                error={errors.purchasePrice?.message}
+                error={errors.purchasePrice?.message as string | undefined}
               />
 
               <Input
-                label="Sale Price"
+                label="Sotuv narxi"
                 type="number"
                 {...register("salePrice")}
-                error={errors.salePrice?.message}
+                error={errors.salePrice?.message as string | undefined}
               />
             </div>
 
             <Input
-              label="Stock Quantity"
+              label="Ombor miqdori"
               type="number"
               {...register("stockQty")}
-              error={errors.stockQty?.message}
+              error={errors.stockQty?.message as string | undefined}
             />
           </div>
         </div>
@@ -197,11 +197,11 @@ export function ProductFormModal({ isOpen, onClose, productToEdit }: Props) {
             onClick={onClose}
             disabled={mutation.isPending}
           >
-            Cancel
+            Bekor qilish
           </Button>
 
           <Button type="submit" isLoading={mutation.isPending}>
-            {productToEdit ? "Save Changes" : "Create Product"}
+            {productToEdit ? "Mahsulotni tahrirlash" : "Yangi mahsulot"}
           </Button>
         </div>
       </form>

@@ -45,7 +45,7 @@ export const productsApi = {
       formData.append("image", values.image);
     }
 
-    const { data } = await api.patch<Product>(`/products/${id}`, formData, {
+    const { data } = await api.put<Product>(`/products/${id}`, formData, {
       headers: { "Content-Type": "multipart/form-data" },
     });
     return data;
