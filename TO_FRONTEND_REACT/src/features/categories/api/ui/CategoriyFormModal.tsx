@@ -16,15 +16,17 @@ const schema = z.object({
 
 type FormValues = z.infer<typeof schema>;
 
-interface Props {
+interface CategoryFormModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onSuccess?: () => void;
   categoryToEdit?: Category | null;
 }
 
-export function CategoryFormModal({ isOpen, onClose, categoryToEdit }: Props) {
+// ✅ FIX 1: onSuccess props dan destructure qilindi
+export function CategoryFormModal({ isOpen, onClose, onSuccess, categoryToEdit }: CategoryFormModalProps) {
   const queryClient = useQueryClient();
-  
+
   const { register, handleSubmit, reset, formState: { errors } } = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: { name: '' },
@@ -38,22 +40,30 @@ export function CategoryFormModal({ isOpen, onClose, categoryToEdit }: Props) {
     }
   }, [categoryToEdit, reset, isOpen]);
 
-  const mutation = useMutation({
-    mutationFn: (data: FormValues) => {
-      if (categoryToEdit) {
-        return categoriesApi.update(categoryToEdit.id, data);
-      }
-      return categoriesApi.create(data);
-    },
+  const createMutation = useMutation({
+    mutationFn: (data: FormValues) => categoriesApi.create(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['categories'] });
-      toast.success(categoryToEdit ? 'Category updated' : 'Category created');
+      toast.success('Kategoriya yaratildi');
+      onSuccess?.();
       onClose();
     },
-    onError: () => {
-      toast.error('Failed to save category');
-    }
+    onError: () => toast.error('Xatolik yuz berdi'),
   });
+
+  const updateMutation = useMutation({
+    mutationFn: (data: FormValues) => categoriesApi.update(categoryToEdit!.id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['categories'] });
+      toast.success('Kategoriya yangilandi');
+      onSuccess?.();
+      onClose();
+    },
+    onError: () => toast.error('Xatolik yuz berdi'),
+  });
+
+  // ✅ FIX 2: categoryToEdit bo'lsa update, bo'lmasa create
+  const mutation = categoryToEdit ? updateMutation : createMutation;
 
   return (
     <Modal
@@ -62,6 +72,7 @@ export function CategoryFormModal({ isOpen, onClose, categoryToEdit }: Props) {
       title={categoryToEdit ? 'Edit Category' : 'New Category'}
       size="sm"
     >
+      {/* ✅ FIX 3: mutation.mutate(d) — to'g'ri chaqiruv */}
       <form onSubmit={handleSubmit((d) => mutation.mutate(d))} className="space-y-4">
         <Input
           label="Category Name"

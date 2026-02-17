@@ -1,4 +1,5 @@
 export interface Category {
+  products: any;
   id: string;
   name: string;
   _count?: {

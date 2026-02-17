@@ -46,6 +46,17 @@ export function CategoriesPage() {
     setIsFormOpen(true);
   };
 
+  // ✅ FIX 1: Modal yopilganda queryni invalidate qilish
+  const handleFormClose = () => {
+    setIsFormOpen(false);
+    setEditingCategory(null);
+  };
+
+  const handleFormSuccess = () => {
+    queryClient.invalidateQueries({ queryKey: ['categories'] });
+    handleFormClose();
+  };
+
   if (isLoading) return <LoadingSpinner className="h-96" />;
 
   return (
@@ -82,18 +93,19 @@ export function CategoriesPage() {
                 </TableCell>
                 <TableCell className="font-medium text-gray-900">{cat.name}</TableCell>
                 <TableCell className="text-gray-500">
-                  {cat._count?.products || 0} items
+                  {/* ✅ FIX 2: _count.products yoki products array uzunligi */}
+                  {cat._count?.products ?? cat.products?.length ?? 0} items
                 </TableCell>
                 {isAdmin && (
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-2">
-                      <button 
+                      <button
                         onClick={() => handleEdit(cat)}
                         className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
                       >
                         <Edit size={18} />
                       </button>
-                      <button 
+                      <button
                         onClick={() => setDeletingId(cat.id)}
                         className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                       >
@@ -115,9 +127,11 @@ export function CategoriesPage() {
         </Table>
       </Card>
 
+      {/* ✅ FIX 3: onClose va onSuccess to'g'ri uzatildi */}
       <CategoryFormModal
         isOpen={isFormOpen}
-        onClose={() => setIsFormOpen(false)}
+        onClose={handleFormClose}
+        onSuccess={handleFormSuccess}
         categoryToEdit={editingCategory}
       />
 
@@ -137,9 +151,9 @@ export function CategoriesPage() {
           </p>
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => setDeletingId(null)}>Cancel</Button>
-            <Button 
-              variant="danger" 
-              isLoading={deleteMutation.isPending} 
+            <Button
+              variant="danger"
+              isLoading={deleteMutation.isPending}
               onClick={() => deletingId && deleteMutation.mutate(deletingId)}
             >
               Kategoriyani ochirish

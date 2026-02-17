@@ -18,12 +18,22 @@ export class CategoriesService {
   async findAll(pagination: PaginationDto): Promise<PaginatedResponseDto<CategoryEntity>> {
     const { page = 1, limit = 20 } = pagination;
     const [categories, total] = await this.categoryRepository.findAndCount({
-      relations: ['parent', 'children'],
+      // ✅ FIX: 'products' relation qo'shildi — mahsulot sonini hisoblash uchun
+      relations: ['parent', 'children', 'products'],
       order: { name: 'ASC' },
       skip: (page - 1) * limit,
       take: limit,
     });
-    return PaginatedResponseDto.create(categories, total, page, limit);
+
+    // ✅ FIX: Har bir categoryga _count qo'shib qaytarish (frontend shu formatni kutayapti)
+    const categoriesWithCount = categories.map((cat) => ({
+      ...cat,
+      _count: {
+        products: cat.products?.length ?? 0,
+      },
+    }));
+
+    return PaginatedResponseDto.create(categoriesWithCount as any, total, page, limit);
   }
 
   async findById(id: string): Promise<CategoryEntity> {
@@ -88,7 +98,10 @@ export class CategoriesService {
     if (dto.parentId !== undefined) updates.parentId = dto.parentId;
 
     await this.categoryRepository.update(id, updates);
-    const updated = await this.categoryRepository.findOne({ where: { id }, relations: ['parent', 'children'] });
+    const updated = await this.categoryRepository.findOne({
+      where: { id },
+      relations: ['parent', 'children'],
+    });
     if (!updated) throw new NotFoundException('Update failed');
 
     await this.auditLogService.log({

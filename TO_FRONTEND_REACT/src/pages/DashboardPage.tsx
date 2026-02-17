@@ -44,7 +44,7 @@ export function DashboardPage() {
   const summaryCards = [
     {
       label: "Bugungi Tushum",
-      value: safeNumber(stats?.todayRevenue), // ✅ Safe conversion
+      value: safeNumber(stats?.todayRevenue),
       icon: TrendingUp,
       color: "text-green-600 bg-green-50",
     },
@@ -147,10 +147,7 @@ export function DashboardPage() {
                 ))}
                 {(!stats?.recentSales || stats.recentSales.length === 0) && (
                   <TableRow>
-                    <TableCell
-                      colSpan={4}
-                      className="text-center py-8 text-gray-500"
-                    >
+                    <TableCell colSpan={4} className="text-center py-8 text-gray-500">
                       Bugun hali savdo yoq.
                     </TableCell>
                   </TableRow>
@@ -163,7 +160,7 @@ export function DashboardPage() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <AlertCircle size={10} className="text-red-500" />
+              <AlertCircle size={16} className="text-red-500" />
               Kam qoldiq ogohlantirishi
             </CardTitle>
           </CardHeader>
@@ -182,13 +179,24 @@ export function DashboardPage() {
                       <p className="text-sm font-medium text-gray-900 truncate max-w-[120px]">
                         {product.name}
                       </p>
-                      <p className="text-xs text-gray-500">
-                        Stock: {product.stockQty}
+                      {/* ✅ 0 ta = qizil, 1-5 ta = to'q sariq */}
+                      <p className={`text-xs font-medium ${
+                        product.stockQty === 0
+                          ? "text-red-600"
+                          : "text-orange-500"
+                      }`}>
+                        {product.stockQty === 0
+                          ? "⚠ Tugagan!"
+                          : `⚠ Qoldiq: ${product.stockQty} ta`}
                       </p>
                     </div>
                   </div>
-                  <Badge variant="danger" className="shrink-0">
-                    Omborni toldirish
+                  {/* ✅ 0 ta = danger, 1-5 ta = warning */}
+                  <Badge
+                    variant={product.stockQty === 0 ? "danger" : "warning"}
+                    className="shrink-0"
+                  >
+                    {product.stockQty === 0 ? "Tugagan" : "Kam qoldiq"}
                   </Badge>
                 </div>
               ))}
@@ -231,10 +239,7 @@ export function DashboardPage() {
             {(!stats?.bestSellingProducts ||
               stats.bestSellingProducts.length === 0) && (
               <TableRow>
-                <TableCell
-                  colSpan={3}
-                  className="text-center py-8 text-gray-500"
-                >
+                <TableCell colSpan={3} className="text-center py-8 text-gray-500">
                   Savdo malumotlari mavjud emas.
                 </TableCell>
               </TableRow>
