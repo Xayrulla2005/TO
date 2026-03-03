@@ -16,6 +16,7 @@ interface AuthState {
   isAuthenticated: boolean; // ✅ Qo'shildi
   login: (user: User, token: string) => void;
   logout: () => void;
+  setAccessToken: (token: string) => void;   // 🔥 qo‘shildi
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -23,32 +24,26 @@ export const useAuthStore = create<AuthState>()(
     (set) => ({
       user: null,
       accessToken: null,
-      isAuthenticated: false, // ✅ Default qiymat
-      
+      isAuthenticated: false,
+
       login: (user, token) => {
-        console.log('🔐 Login:', { user, accessToken: token });
-        
-        // ✅ localStorage ga saqlash
-        localStorage.setItem('accessToken', token);
-        
-        console.log('✅ Token localStorage ga saqlandi');
-        console.log('🔑 Tekshirish:', localStorage.getItem('accessToken'));
-        
-        set({ 
-          user, 
+        set({
+          user,
           accessToken: token,
-          isAuthenticated: true // ✅ True ga o'zgaradi
+          isAuthenticated: true,
         });
       },
-      
+
       logout: () => {
-        console.log('🔓 Logout');
-        localStorage.removeItem('accessToken');
-        set({ 
-          user: null, 
+        set({
+          user: null,
           accessToken: null,
-          isAuthenticated: false // ✅ False ga qaytadi
+          isAuthenticated: false,
         });
+      },
+
+      setAccessToken: (token: string) => {
+        set({ accessToken: token });
       },
     }),
     {

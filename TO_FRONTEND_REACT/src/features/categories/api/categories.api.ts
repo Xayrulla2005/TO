@@ -1,4 +1,4 @@
-import { api } from '@/shared/lib/axios';
+import { api } from '../../../shared/lib/axios';
 import { Category, CreateCategoryDto, UpdateCategoryDto } from '../../../shared/types/categoriy';
 
 export const categoriesApi = {
@@ -9,9 +9,18 @@ export const categoriesApi = {
   },
 
   create: async (payload: CreateCategoryDto) => {
-    const { data } = await api.post<Category>('/categories', payload);
+  try {
+    const { data } = await api.post('/categories', payload);
     return data;
-  },
+  } catch (error: any) {
+    const serverMessage =
+      error?.response?.data?.message?.message ??
+      error?.response?.data?.message ??
+      'Xatolik yuz berdi';
+
+    throw new Error(serverMessage);
+  }
+},
 
   // ✅ FIX 2: patch → put (Backend @Put ishlatayapti, @Patch emas!)
   update: async (id: string, payload: UpdateCategoryDto) => {

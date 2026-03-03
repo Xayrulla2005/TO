@@ -18,9 +18,9 @@ const schema = z.object({
   categoryId: z.string().min(1, "Category is required"),
 
   // Eng to'g'ri usul: coerce
-  purchasePrice: z.coerce.number().min(0, "Purchase price must be >= 0"),
-  salePrice: z.coerce.number().min(0, "Sale price must be >= 0"),
-  stockQty: z.coerce.number().int().min(0, "Stock qty must be >= 0"),
+  purchasePrice: z.string().min(1, "Purchase price is required"),
+salePrice: z.string().min(1, "Sale price is required"),
+stockQty: z.string().min(1, "Stock qty is required"),
 
   image: z.any().optional(),
 });
@@ -46,13 +46,13 @@ export function ProductFormModal({ isOpen, onClose, productToEdit }: Props) {
   const form = useForm<FormInput, any, FormOutput>({
     resolver: zodResolver(schema),
     defaultValues: {
-      name: "",
-      categoryId: "",
-      purchasePrice: 0,
-      salePrice: 0,
-      stockQty: 0,
-      image: undefined,
-    },
+  name: "",
+  categoryId: "",
+  purchasePrice: "",
+  salePrice: "",
+  stockQty: "",
+  image: undefined,
+}
   });
 
   const {
@@ -68,38 +68,41 @@ export function ProductFormModal({ isOpen, onClose, productToEdit }: Props) {
 
     if (productToEdit) {
       reset({
-        name: productToEdit.name,
-        categoryId: productToEdit.categoryId,
-        purchasePrice: Number(productToEdit.purchasePrice),
-        salePrice: Number(productToEdit.salePrice),
-        stockQty: Number(productToEdit.stockQty),
-        image: undefined,
-      });
+  name: productToEdit.name,
+  categoryId: productToEdit.categoryId,
+  purchasePrice: String(productToEdit.purchasePrice),
+  salePrice: String(productToEdit.salePrice),
+  stockQty: String(productToEdit.stockQty),
+  image: undefined,
+});
     } else {
       reset({
-        name: "",
-        categoryId: "",
-        purchasePrice: 0,
-        salePrice: 0,
-        stockQty: 0,
-        image: undefined,
-      });
+  name: "",
+  categoryId: "",
+  purchasePrice: "",
+  salePrice: "",
+  stockQty: "",
+  image: undefined,
+});
     }
   }, [productToEdit, reset, isOpen]);
 
   const mutation = useMutation({
-    mutationFn: (data: FormOutput) => {
-      const payload = {
-        ...data,
-        image: data.image as File | undefined,
-      };
+    mutationFn: (data: FormInput) => {
+    const payload = {
+      ...data,
+      purchasePrice: Number(data.purchasePrice),
+      salePrice: Number(data.salePrice),
+      stockQty: Number(data.stockQty),
+      image: data.image as File | undefined,
+    };
 
-      if (productToEdit) {
-        return productsApi.update(productToEdit.id, payload);
-      }
+    if (productToEdit) {
+      return productsApi.update(productToEdit.id, payload);
+    }
 
-      return productsApi.create(payload);
-    },
+    return productsApi.create(payload);
+  },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["products"] });
       toast.success(productToEdit ? "Product updated" : "Product created");
@@ -119,76 +122,92 @@ export function ProductFormModal({ isOpen, onClose, productToEdit }: Props) {
         onSubmit={handleSubmit((d) => mutation.mutate(d))}
         className="space-y-6"
       >
-        <div className="flex gap-6">
-          <div className="flex-shrink-0">
-            <Controller
-              control={control}
-              name="image"
-              render={({ field: { onChange } }) => (
-                <ImageUpload
-                  initialImage={productToEdit?.imageUrl}
-                  onChange={onChange}
-                  error={errors.image?.message?.toString()}
-                />
-              )}
-            />
-          </div>
+        <div className="flex gap-8">
+  {/* IMAGE SECTION */}
+  <div className="flex-shrink-0">
+    <Controller
+      control={control}
+      name="image"
+      render={({ field: { onChange } }) => (
+        <ImageUpload
+          initialImage={productToEdit?.imageUrl}
+          onChange={onChange}
+          error={errors.image?.message?.toString()}
+        />
+      )}
+    />
+  </div>
 
-          <div className="flex-1 space-y-4">
-            <Input
-              label="Mahsulot nomi"
-              {...register("name")}
-              error={errors.name?.message}
-            />
+  {/* FORM SECTION */}
+  <div className="flex-1 space-y-6">
 
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-gray-700">
-                Kategoriya
-              </label>
+    {/* NAME */}
+    <Input
+      label="Mahsulot nomi"
+      {...register("name")}
+      error={errors.name?.message}
+    />
 
-              <select
-                {...register("categoryId")}
-                className="flex h-10 w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              >
-                <option value="">Kategoriya tanlash</option>
-                {(categories || []).map((cat: Category) => (
-                  <option key={cat.id} value={cat.id}>
-                    {cat.name}
-                  </option>
-                ))}
-              </select>
+    {/* CATEGORY */}
+    <div className="space-y-2">
+      <label className="text-sm font-medium text-gray-700">
+        Kategoriya
+      </label>
 
-              {errors.categoryId && (
-                <p className="text-xs text-red-500">
-                  {errors.categoryId.message}
-                </p>
-              )}
-            </div>
+      <select
+        {...register("categoryId")}
+        className="h-11 w-full rounded-xl border border-gray-300 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+      >
+        <option value="">Kategoriya tanlash</option>
+        {(categories || []).map((cat: Category) => (
+          <option key={cat.id} value={cat.id}>
+            {cat.name}
+          </option>
+        ))}
+      </select>
 
-            <div className="grid grid-cols-2 gap-4">
-              <Input
-                label="Sotib olish narxi"
-                type="number"
-                {...register("purchasePrice")}
-                error={errors.purchasePrice?.message as string | undefined}
-              />
+      {errors.categoryId && (
+        <p className="text-xs text-red-500">
+          {errors.categoryId.message}
+        </p>
+      )}
+    </div>
 
-              <Input
-                label="Sotuv narxi"
-                type="number"
-                {...register("salePrice")}
-                error={errors.salePrice?.message as string | undefined}
-              />
-            </div>
+    {/* PRICES */}
+    <div className="grid grid-cols-2 gap-4">
 
-            <Input
-              label="Ombor miqdori"
-              type="number"
-              {...register("stockQty")}
-              error={errors.stockQty?.message as string | undefined}
-            />
-          </div>
-        </div>
+      <Input
+        label="Sotib olish narxi"
+        type="number"
+        step="0.01"
+        min="0"
+        className="h-11"
+        {...register("purchasePrice")}
+        error={errors.purchasePrice?.message as string | undefined}
+      />
+
+      <Input
+        label="Sotuv narxi"
+        type="number"
+        step="0.01"
+        min="0"
+        className="h-11"
+        {...register("salePrice")}
+        error={errors.salePrice?.message as string | undefined}
+      />
+    </div>
+
+    {/* STOCK */}
+    <Input
+      label="Ombor miqdori"
+      type="number"
+      min="0"
+      className="h-11"
+      {...register("stockQty")}
+      error={errors.stockQty?.message as string | undefined}
+    />
+  </div>
+</div>
 
         <div className="flex justify-end gap-2 pt-4 border-t border-gray-100">
           <Button

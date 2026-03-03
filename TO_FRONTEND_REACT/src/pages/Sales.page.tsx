@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import { productsApi } from '../features/products/api/product.api';
 import { salesApi } from '../features/sales/api/sales.api';
 import { categoriesApi } from '../features/categories/api/categories.api'; // ✅ QO'SHILDI
@@ -19,12 +19,13 @@ interface CartItem {
 }
 
 export function SalesPage() {
-  const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   // ✅ null = "Barchasi", string = category ID
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
+  const [completedSale, setCompletedSale] = useState<any>(null);
 
   const { data: products, isLoading: productsLoading } = useQuery({
     queryKey: ['products'],
@@ -40,7 +41,7 @@ export function SalesPage() {
   const createSaleMutation = useMutation({
     mutationFn: async (paymentData: PaymentData) => {
       const draftSale = await salesApi.create({
-        items: cart.map((item) => ({
+        items: cart.map((item: { product: { id: any; }; qty: any; unitPrice: any; }) => ({
           productId: item.product.id,
           quantity: Number(item.qty),
           customUnitPrice: Number(item.unitPrice),
@@ -60,20 +61,24 @@ export function SalesPage() {
         debtorPhone: paymentData.customerPhone,
       });
     },
-    onSuccess: () => {
-      toast.success('Savdo muvaffaqiyatli yakunlandi!');
-      setCart([]);
-      setIsPaymentModalOpen(false);
-      queryClient.invalidateQueries({ queryKey: ['sales'] });
-      queryClient.invalidateQueries({ queryKey: ['products'] });
-    },
-    onError: (error: any) => {
-      toast.error(error?.response?.data?.message || 'Savdoni yakunlashda xatolik');
-    },
+    onSuccess: async (sale) => {
+  toast.success('Savdo yakunlandi');
+
+  const blob = await salesApi.downloadReceipt(sale.id);
+  const url = window.URL.createObjectURL(
+    new Blob([blob], { type: 'application/pdf' })
+  );
+
+  setReceiptUrl(url);
+  setCompletedSale(sale);
+
+  setCart([]);
+  setIsPaymentModalOpen(false);
+},
   });
 
   const addToCart = (product: Product) => {
-    setCart(prev => {
+    setCart((prev: any[]) => {
       const existing = prev.find(i => i.product.id === product.id);
       if (existing) return prev.map(i => i.product.id === product.id ? { ...i, qty: i.qty + 1 } : i);
       return [...prev, { product, qty: 1, unitPrice: Number(product.salePrice) || 0 }];
@@ -81,22 +86,22 @@ export function SalesPage() {
   };
 
   const updateQty = (productId: string, delta: number) => {
-    setCart(prev =>
+    setCart((prev: any[]) =>
       prev.map(i => i.product.id === productId ? { ...i, qty: Math.max(1, i.qty + delta) } : i)
     );
   };
 
   const updateUnitPrice = (productId: string, newPrice: number) => {
-    setCart(prev => prev.map(i => i.product.id === productId ? { ...i, unitPrice: Number(newPrice) || 0 } : i));
+    setCart((prev: any[]) => prev.map(i => i.product.id === productId ? { ...i, unitPrice: Number(newPrice) || 0 } : i));
   };
 
   const removeFromCart = (productId: string) => {
-    setCart(prev => prev.filter(i => i.product.id !== productId));
+    setCart((prev: any[]) => prev.filter(i => i.product.id !== productId));
   };
 
-  const subtotal = cart.reduce((sum, i) => sum + i.qty * i.unitPrice, 0);
+  const subtotal = cart.reduce((sum: number, i: { qty: number; unitPrice: number; }) => sum + i.qty * i.unitPrice, 0);
   const grandTotal = subtotal;
-  const totalItems = cart.reduce((sum, i) => sum + i.qty, 0);
+  const totalItems = cart.reduce((sum: any, i: { qty: any; }) => sum + i.qty, 0);
 
   // ✅ Filter: categoryId bo'yicha (p.category?.name emas!)
   const filteredProducts = (products || []).filter((p: Product) => {
@@ -113,9 +118,10 @@ export function SalesPage() {
     );
   }
 
+
   return (
     <>
-      <div className="h-[calc(100vh-8rem)] flex flex-col lg:flex-row gap-6">
+      <div className="h-[100dvh] flex flex-col lg:flex-row gap-6">
         <Card className="flex-1 flex flex-col min-h-0 bg-gray-50 border-none shadow-none lg:bg-white lg:shadow-sm lg:border-gray-100">
           <div className="p-4 bg-white lg:rounded-t-2xl border-b border-gray-100 sticky top-0 z-10">
             <Input
@@ -297,6 +303,52 @@ export function SalesPage() {
         onConfirm={(pd) => createSaleMutation.mutate(pd)}
         isSubmitting={createSaleMutation.isPending}
       />
+      {receiptUrl && (
+  <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+    <div className="bg-white w-[420px] h-[650px] rounded-xl shadow-xl flex flex-col">
+
+      {/* Header */}
+      <div className="p-3 border-b flex justify-between items-center">
+        <h3 className="font-bold">Chek preview</h3>
+        <button onClick={() => setReceiptUrl(null)}>✕</button>
+      </div>
+
+      {/* PDF Preview */}
+      <div className="flex-1 overflow-hidden">
+        <iframe
+          src={receiptUrl}
+          className="w-full h-full"
+        />
+      </div>
+
+      {/* Actions */}
+      <div className="p-3 border-t flex gap-2">
+        <button
+          onClick={() => {
+            const iframe = document.querySelector("iframe") as HTMLIFrameElement;
+            iframe?.contentWindow?.print();
+          }}
+          className="flex-1 bg-indigo-600 text-white py-2 rounded-lg"
+        >
+          Print
+        </button>
+
+        <a
+          href={receiptUrl}
+          download={`receipt-${completedSale?.saleNumber}.pdf`}
+          className="flex-1 bg-gray-200 text-center py-2 rounded-lg"
+        >
+          PDF yuklash
+        </a>
+      </div>
+    </div>
+  </div>
+)}
     </>
+
+    
   );
 }
+
+
+

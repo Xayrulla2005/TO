@@ -22,6 +22,7 @@ import { AuditLogService } from '../audit-logs/audit-logs.service';
 import { AuditAction, AuditEntity as AuditEntityEnum } from '../audit-logs/entities/audit-log.entity';
 import { UserRole } from '../common/dto/roles.enum';
 import { SaleQueryDto } from './dto/sale.query.dto';
+import { ReceiptService } from './resipt.service';
 
 @Injectable()
 export class SalesService {
@@ -40,6 +41,7 @@ export class SalesService {
     private readonly inventoryTransactionRepository: Repository<InventoryTransactionEntity>,
     private readonly dataSource: DataSource,
     private readonly auditLogService: AuditLogService,
+    
   ) {}
 
   // ─── Wrapper metodlar controller uchun ───────────────────

@@ -2,6 +2,7 @@
 // src/sales/sales.controller.ts
 // ============================================================
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -29,13 +30,20 @@ import { CurrentUser } from '../common/decarators/current.user.decarator';
 import { UserRole } from '../common/dto/roles.enum';
 import { UserEntity } from '../user/entities/user.entity';
 import { PaginationDto } from '../common/dto/pagination.dto';
+import { Res } from '@nestjs/common';
+import express from 'express';
+import { ReceiptService } from './resipt.service';
+
 
 @ApiTags('Sales')
 @Controller('api/v1/sales')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @ApiBearerAuth()
 export class SalesController {
-  constructor(private readonly salesService: SalesService) {}
+ constructor(
+    private readonly salesService: SalesService,
+    private readonly receiptService: ReceiptService,
+  ) {}
 
   // ─── Create Sale (DRAFT) – Both ADMIN and SALER ────────
   @Post()
@@ -110,4 +118,20 @@ export class SalesController {
   async findById(@Param('id') saleId: string) {
     return this.salesService.findById(saleId);
   }
+
+  @Get(':id/receipt')
+@Roles(UserRole.ADMIN, UserRole.SALER)
+@ApiOperation({ summary: 'Generate PDF receipt for completed sale' })
+async getReceipt(
+  @Param('id') saleId: string,
+  @Res() res: express.Response,
+) {
+  const sale = await this.salesService.findById(saleId);
+
+  if (sale.status !== SaleStatus.COMPLETED) {
+    throw new BadRequestException('Receipt available only for completed sales');
+  }
+
+  return this.receiptService.generateReceipt(sale, res);
+}
 }

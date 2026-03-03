@@ -27,10 +27,10 @@ interface CategoryFormModalProps {
 export function CategoryFormModal({ isOpen, onClose, onSuccess, categoryToEdit }: CategoryFormModalProps) {
   const queryClient = useQueryClient();
 
-  const { register, handleSubmit, reset, formState: { errors } } = useForm<FormValues>({
-    resolver: zodResolver(schema),
-    defaultValues: { name: '' },
-  });
+  const { register, handleSubmit, reset, setValue } = useForm<FormValues>({
+  resolver: zodResolver(schema),
+  defaultValues: { name: '' },
+});
 
   useEffect(() => {
     if (categoryToEdit) {
@@ -41,15 +41,17 @@ export function CategoryFormModal({ isOpen, onClose, onSuccess, categoryToEdit }
   }, [categoryToEdit, reset, isOpen]);
 
   const createMutation = useMutation({
-    mutationFn: (data: FormValues) => categoriesApi.create(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['categories'] });
-      toast.success('Kategoriya yaratildi');
-      onSuccess?.();
-      onClose();
-    },
-    onError: () => toast.error('Xatolik yuz berdi'),
-  });
+  mutationFn: (data: FormValues) => categoriesApi.create(data),
+  onSuccess: () => {
+    queryClient.invalidateQueries({ queryKey: ['categories'] });
+    toast.success('Kategoriya yaratildi');
+    onSuccess?.();
+    onClose();
+  },
+onError: (error: any) => {
+  toast.error(error.message);
+},
+});
 
   const updateMutation = useMutation({
     mutationFn: (data: FormValues) => categoriesApi.update(categoryToEdit!.id, data),
@@ -59,7 +61,9 @@ export function CategoryFormModal({ isOpen, onClose, onSuccess, categoryToEdit }
       onSuccess?.();
       onClose();
     },
-    onError: () => toast.error('Xatolik yuz berdi'),
+    onError: (error: any) => {
+  toast.error(error.message || 'Xatolik yuz berdi');
+},
   });
 
   // ✅ FIX 2: categoryToEdit bo'lsa update, bo'lmasa create
@@ -74,12 +78,16 @@ export function CategoryFormModal({ isOpen, onClose, onSuccess, categoryToEdit }
     >
       {/* ✅ FIX 3: mutation.mutate(d) — to'g'ri chaqiruv */}
       <form onSubmit={handleSubmit((d) => mutation.mutate(d))} className="space-y-4">
-        <Input
-          label="Category Name"
-          placeholder="e.g. Electronics"
-          {...register('name')}
-          error={errors.name?.message}
-        />
+       <Input
+  label="Category Name"
+  {...register("name")}
+  onChange={(e) => {
+    const value = e.target.value;
+    const formatted =
+      value.charAt(0).toUpperCase() + value.slice(1).toLowerCase();
+    setValue("name", formatted);
+  }}
+/>
         <div className="flex justify-end gap-2 pt-2">
           <Button type="button" variant="outline" onClick={onClose} disabled={mutation.isPending}>
             Cancel

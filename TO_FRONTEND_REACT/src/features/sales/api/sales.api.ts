@@ -39,4 +39,12 @@ export const salesApi = {
     return data;
   },
   
+  downloadReceipt: async (saleId: string) => {
+  const { data } = await api.get(
+    `/sales/${saleId}/receipt`,
+    { responseType: 'blob' }
+  );
+
+  return data;
+},
 };

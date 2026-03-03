@@ -9,6 +9,7 @@ import { InventoryTransactionEntity } from '../inventory/entities/inventory.enti
 import { SalesService } from './sale.service';
 import { SalesController } from './sale.controller';
 import { CommonModule } from '../common/common.module';
+import { ReceiptService } from './resipt.service';
 
 @Module({
   imports: [
@@ -22,7 +23,10 @@ import { CommonModule } from '../common/common.module';
     ]),
     CommonModule,
   ],
-  providers: [SalesService],
+  providers: [
+    SalesService,
+    ReceiptService,
+  ],
   controllers: [SalesController],
   exports: [SalesService],
 })
