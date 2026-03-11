@@ -22,6 +22,7 @@ interface CompleteSalePayload {
   debtorPhone?: string;
   debtDueDate?: string;
   debtNotes?: string;
+  agreedTotal?: number;
 }
 
 

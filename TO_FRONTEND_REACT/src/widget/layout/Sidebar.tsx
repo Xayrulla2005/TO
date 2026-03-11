@@ -3,8 +3,7 @@ import { useAuthStore } from '@/features/auth/model/auth.store';
 import { cn } from '@/shared/lib/utils';
 import {
   LayoutDashboard, ShoppingCart, Package, Tags,
-  Users, BarChart3, FileText, Settings, LogOut,
-  DollarSign
+  Users, BarChart3, FileText, Settings, LogOut
 } from 'lucide-react';
 
 export function Sidebar({ isMobile = false }: { isMobile?: boolean }) {
@@ -19,7 +18,6 @@ export function Sidebar({ isMobile = false }: { isMobile?: boolean }) {
     { to: '/statistics', icon: BarChart3, label: 'Statistika', roles: ['ADMIN', 'SALER'] },
     { to: '/audit-logs', icon: FileText, label: 'Audit Jurnali', roles: ['ADMIN'] },
     { to: '/settings', icon: Settings, label: 'Sozlamalar', roles: ['ADMIN'] },
-    { to: '/debts', icon: DollarSign, label: 'Qarzlar' },
   ];
 
   const content = (

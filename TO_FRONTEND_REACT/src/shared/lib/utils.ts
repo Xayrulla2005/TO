@@ -12,10 +12,10 @@ export function formatCurrency(value: number | string | null | undefined): strin
   
   // Check if valid number
   if (isNaN(num) || !isFinite(num)) {
-    return 'UZS 0';
+    return '0';
   }
   
-  return `UZS ${num.toLocaleString('en-US', {
+  return `${num.toLocaleString('en-US', {
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
   })}`;

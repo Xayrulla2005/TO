@@ -3,11 +3,12 @@ import { Product, ProductFormValues } from "../../../shared/types/product";
 
 export const productsApi = {
   getAll: async () => {
-    const { data } = await api.get("/products");
-
-    // Paginated response
-    return data.data; // Array qaytaradi
+    const { data } = await api.get("/products", {
+      params: { limit: 1000 }
+    });
+    return data.data;
   },
+
   getOne: async (id: string) => {
     const { data } = await api.get<Product>(`/products/${id}`);
     return data;
