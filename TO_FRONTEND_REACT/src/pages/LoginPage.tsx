@@ -17,8 +17,8 @@ type LoginForm = z.infer<typeof loginSchema>;
 
 export function LoginPage() {
   const navigate = useNavigate();
-  useAuthStore();
-  
+  const { login } = useAuthStore();
+
   const { register, handleSubmit, formState: { errors } } = useForm<LoginForm>({
     resolver: zodResolver(loginSchema),
   });
@@ -26,25 +26,29 @@ export function LoginPage() {
   const mutation = useMutation({
     mutationFn: authApi.login,
     onSuccess: (res) => {
-      
-      
-      
-      
+      const { accessToken, user } = res.data;
+
+      // ✅ username -> fullName map qilish (backend username qaytaradi)
+      login(
+        {
+          id: user.id,
+          fullName: user.fullName || user.username,
+          phone: user.phone || '',
+          role: user.role,
+          isActive: user.isActive,
+        },
+        accessToken
+      );
+
       toast.success('Xush kelibsiz!');
-      
-      
-      navigate(res.data.user.role === 'SALER' ? '/sales' : '/dashboard', { replace: true });
-      
-      
+      navigate(user.role === 'SALER' ? '/sales' : '/dashboard', { replace: true });
     },
     onError: () => {
-     
       toast.error('Ism yoki parol noto\'g\'ri');
-    }
+    },
   });
 
   const onSubmit = (data: LoginForm) => {
-   
     mutation.mutate(data);
   };
 
@@ -62,7 +66,7 @@ export function LoginPage() {
             <input
               {...register('fullName')}
               className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 shadow-sm focus:border-primary-500 focus:ring-primary-500"
-              placeholder="Masalan: Xayrulla Aliyev"
+              placeholder="Masalan: Xayrulla"
             />
             {errors.fullName && <p className="text-red-500 text-xs mt-1">{errors.fullName.message}</p>}
           </div>
