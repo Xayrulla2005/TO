@@ -21,6 +21,7 @@ import { StatisticsModule } from './statistics/statistics.module';
 import { AuditLogsModule } from './audit-logs/audit-logs.module'; // re-exported
 import { DebtsModule } from './debts/debts.module'; // re-exported
 import { ConfigModule } from '@nestjs/config';
+import { CustomersModule } from './customers/customers.module';
 
 
 
@@ -53,6 +54,7 @@ import { ConfigModule } from '@nestjs/config';
     StatisticsModule,
     AuditLogsModule,
     DebtsModule,
+    CustomersModule,
   ],
   providers: [
     {

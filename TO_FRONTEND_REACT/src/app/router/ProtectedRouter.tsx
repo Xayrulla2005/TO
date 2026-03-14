@@ -7,22 +7,22 @@ interface Props {
 }
 
 export function ProtectedRoute({ allowedRoles }: Props) {
-  const { accessToken, user } = useAuthStore(); // ✅ isAuthenticated o'rniga accessToken
+  const { accessToken, user } = useAuthStore();
 
-  console.log('🛡️ ProtectedRoute check:', { accessToken: !!accessToken, user, allowedRoles }); // Debug
-
-  // ✅ Token yo'q bo'lsa login ga yo'naltirish
+  // Token yo'q — login ga
   if (!accessToken) {
-    console.log('❌ Token yo\'q, login ga yo\'naltirilmoqda');
     return <Navigate to="/login" replace />;
   }
 
-  // ✅ Role tekshirish
+  // Role tekshirish
   if (allowedRoles && user && !allowedRoles.includes(user.role)) {
-    console.log('❌ Ruxsat yo\'q, dashboard ga yo\'naltirilmoqda');
+    // SALER admin sahifalariga kirmoqchi bo'lsa — /sales ga
+    if (user.role === 'SALER') {
+      return <Navigate to="/sales" replace />;
+    }
+    // Boshqa holat — /dashboard ga
     return <Navigate to="/dashboard" replace />;
   }
 
-  console.log('✅ Ruxsat berildi');
   return <Outlet />;
 }

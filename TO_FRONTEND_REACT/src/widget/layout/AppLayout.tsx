@@ -18,6 +18,11 @@ export function AppLayout() {
     setIsMobileMenuOpen(false);
   };
 
+  const roleLabel = isAdmin ? 'Admin' : 'Sotuvchi';
+  const roleBadgeClass = isAdmin
+    ? 'bg-indigo-100 text-indigo-700'
+    : 'bg-emerald-100 text-emerald-700';
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Mobile Header */}
@@ -29,7 +34,6 @@ export function AppLayout() {
           {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
         </button>
 
-        {/* ✅ Nom o'zgartirildi */}
         <div className="flex items-center gap-2">
           <div className="h-8 w-8 bg-indigo-600 rounded-lg flex items-center justify-center">
             <span className="text-white font-bold text-sm">T</span>
@@ -37,7 +41,6 @@ export function AppLayout() {
           <span className="font-bold text-gray-900">Tanirovka Optom</span>
         </div>
 
-        {/* ✅ Bell olib tashlandi, faqat avatar qoldi */}
         <div className="h-8 w-8 bg-indigo-100 rounded-full flex items-center justify-center">
           <span className="text-indigo-600 font-semibold text-sm">
             {user?.fullName?.trim()?.[0]?.toUpperCase() || 'U'}
@@ -56,12 +59,9 @@ export function AppLayout() {
             <div className="p-4 space-y-6">
               <div className="pb-4 border-b border-gray-200">
                 <p className="text-sm font-medium text-gray-900">{user?.fullName}</p>
-                <p className="text-xs text-gray-500">{user?.role}</p>
-                {isAdmin && (
-                  <span className="inline-block mt-2 px-2 py-0.5 bg-indigo-100 text-indigo-700 text-xs font-medium rounded">
-                    Admin
-                  </span>
-                )}
+                <span className={`inline-block mt-2 px-2 py-0.5 text-xs font-medium rounded ${roleBadgeClass}`}>
+                  {roleLabel}
+                </span>
               </div>
               <SidebarNavLinks isAdmin={isAdmin} onNavigate={closeMobileMenu} />
               <button
@@ -78,7 +78,6 @@ export function AppLayout() {
 
       {/* Desktop Sidebar */}
       <aside className="hidden md:flex fixed left-0 top-0 bottom-0 w-64 bg-white border-r border-gray-200 flex-col z-30">
-        {/* ✅ Logo va nom o'zgartirildi */}
         <div className="h-16 flex items-center gap-3 px-6 border-b border-gray-200">
           <div className="h-10 w-10 bg-indigo-600 rounded-lg flex items-center justify-center">
             <span className="text-white font-bold text-lg">T</span>
@@ -101,9 +100,8 @@ export function AppLayout() {
         </div>
       </aside>
 
-      {/* Main Content Area */}
+      {/* Main Content */}
       <div className="md:ml-64">
-        {/* ✅ Desktop Header — Search va Bell olib tashlandi, faqat user info qoldi */}
         <header className="hidden md:flex sticky top-0 h-16 bg-white border-b border-gray-200 z-20 items-center justify-end px-6">
           <div className="flex items-center gap-3">
             <div className="h-9 w-9 bg-indigo-100 rounded-full flex items-center justify-center">
@@ -113,10 +111,9 @@ export function AppLayout() {
             </div>
             <div className="hidden lg:block">
               <p className="text-sm font-medium text-gray-900">{user?.fullName}</p>
-              <p className="text-xs text-gray-500">{user?.role}</p>
             </div>
-            <span className="text-xs font-medium text-gray-500 bg-gray-100 px-2 py-0.5 rounded ml-1">
-              ADMIN
+            <span className={`text-xs font-medium px-2 py-0.5 rounded ml-1 ${roleBadgeClass}`}>
+              {roleLabel}
             </span>
           </div>
         </header>

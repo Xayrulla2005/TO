@@ -7,13 +7,13 @@ import { AppLayout } from '../widget/layout/AppLayout';
 import { UsersPage } from '../pages/UserPage';
 import { LoginPage } from '../pages/LoginPage';
 import { DashboardPage } from '../pages/DashboardPage';
-import { SalesPage } from '../pages/Sales.page';
+import { SalesPage } from '../pages/SalesPage';
 import { ProductsPage } from '../pages/ProductsPage';
 import { CategoriesPage } from '../pages/CategoriesPage';
 import { StatisticsPage } from '../pages/StatisticsPage';
 import { AuditLogsPage } from '../pages/AuditLogsPage';
 import { CustomersPage } from '../pages/CustomersPage';
-
+import { useAuthStore } from '../features/auth/model/auth.store';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -24,33 +24,49 @@ const queryClient = new QueryClient({
   },
 });
 
+// Login bo'lgandan keyin role ga qarab yo'naltirish
+function RoleBasedRedirect() {
+  const { user } = useAuthStore();
+  if (user?.role === 'SALER') return <Navigate to="/sales" replace />;
+  return <Navigate to="/dashboard" replace />;
+}
+
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <Routes>
-          {/* Public routes */}
+          {/* Public */}
           <Route path="/login" element={<LoginPage />} />
 
-          {/* Protected routes - All authenticated users */}
-          <Route element={<ProtectedRoute />}>
+          {/* ADMIN only routes */}
+          <Route element={<ProtectedRoute allowedRoles={['ADMIN']} />}>
             <Route element={<AppLayout />}>
-              <Route path="/" element={<Navigate to="/dashboard" replace />} />
               <Route path="/dashboard" element={<DashboardPage />} />
-              <Route path="/sales" element={<SalesPage />} />
               <Route path="/products" element={<ProductsPage />} />
               <Route path="/categories" element={<CategoriesPage />} />
-              <Route path="/customers" element={<CustomersPage />} />
               <Route path="/statistics" element={<StatisticsPage />} />
+              <Route path="/users" element={<UsersPage />} />
+              <Route path="/audit-logs" element={<AuditLogsPage />} />
             </Route>
           </Route>
 
-          {/* Admin only routes */}
-          <Route element={<ProtectedRoute allowedRoles={['ADMIN']} />}>
+          {/* ADMIN + SALER routes */}
+          <Route element={<ProtectedRoute allowedRoles={['ADMIN', 'SALER']} />}>
             <Route element={<AppLayout />}>
-              <Route path="/users" element={<UsersPage />} />  {/* ✅ TO'G'RI */}
-              <Route path="/audit-logs" element={<AuditLogsPage />} />
+              <Route path="/sales" element={<SalesPage />} />
+              <Route path="/customers" element={<CustomersPage />} />
             </Route>
+          </Route>
+
+          {/* Default redirect — role ga qarab */}
+          <Route path="/" element={<ProtectedRoute />}>
+            <Route index element={<RoleBasedRedirect />} />
+          </Route>
+
+          {/* Noto'g'ri URL — role ga qarab */}
+          <Route path="*" element={<ProtectedRoute />}>
+            <Route path="*" element={<RoleBasedRedirect />} />
           </Route>
         </Routes>
         <ToastContainer />

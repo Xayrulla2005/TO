@@ -18,6 +18,12 @@ interface CompleteSalePayload {
     amount: number;
     notes?: string;
   }[];
+  // Mavjud mijoz ID si
+  customerId?: string;
+  // Yangi mijoz
+  customerName?: string;
+  customerPhone?: string;
+  // Backward compat
   debtorName?: string;
   debtorPhone?: string;
   debtDueDate?: string;
@@ -25,27 +31,19 @@ interface CompleteSalePayload {
   agreedTotal?: number;
 }
 
-
-
 export const salesApi = {
-  // DRAFT yaratish
   create: async (payload: CreateSalePayload) => {
     const { data } = await api.post('/sales', payload);
     return data;
   },
 
-  // To'lovni amalga oshirish
   complete: async (saleId: string, payload: CompleteSalePayload) => {
     const { data } = await api.post(`/sales/${saleId}/complete`, payload);
     return data;
   },
-  
-  downloadReceipt: async (saleId: string) => {
-  const { data } = await api.get(
-    `/sales/${saleId}/receipt`,
-    { responseType: 'blob' }
-  );
 
-  return data;
-},
+  downloadReceipt: async (saleId: string) => {
+    const { data } = await api.get(`/sales/${saleId}/receipt`, { responseType: 'blob' });
+    return data;
+  },
 };

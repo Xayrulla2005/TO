@@ -1,5 +1,5 @@
 // ============================================================
-// src/sales/sales.service.ts - PRODUCTION COMPLETE
+// src/sales/sales.service.ts
 // ============================================================
 import {
   Injectable,
@@ -13,16 +13,14 @@ import { SaleItemEntity } from './entities/sale.item.entity';
 import { ProductEntity } from '../products/entities/product.entity';
 import { PaymentEntity, PaymentMethod } from '../payments/entities/payment.entity';
 import { DebtEntity, DebtStatus } from '../debts/entities/debt.entity';
-import { InventoryTransactionEntity } from '../inventory/entities/inventory.entity';
-import { InventoryTransactionType } from '../inventory/entities/inventory.entity';
+import { InventoryTransactionEntity, InventoryTransactionType } from '../inventory/entities/inventory.entity';
 import { CreateSaleDto, UpdateSaleDto, CompleteSaleDto, CancelSaleDto } from './dto/create-sale.dto';
-import { UpdateSaleItemDto } from './dto/create-sale.dto';
-import { PaginationDto, PaginatedResponseDto } from '../common/dto/pagination.dto';
+import { PaginatedResponseDto } from '../common/dto/pagination.dto';
 import { AuditLogService } from '../audit-logs/audit-logs.service';
 import { AuditAction, AuditEntity as AuditEntityEnum } from '../audit-logs/entities/audit-log.entity';
 import { UserRole } from '../common/dto/roles.enum';
 import { SaleQueryDto } from './dto/sale.query.dto';
-import { ReceiptService } from './resipt.service';
+import { CustomerEntity } from '../customers/entities/customer.entity';
 
 @Injectable()
 export class SalesService {
@@ -41,71 +39,39 @@ export class SalesService {
     private readonly inventoryTransactionRepository: Repository<InventoryTransactionEntity>,
     private readonly dataSource: DataSource,
     private readonly auditLogService: AuditLogService,
-    
   ) {}
 
-  // ─── Wrapper metodlar controller uchun ───────────────────
   async createSale(dto: CreateSaleDto, userId: string): Promise<SaleEntity> {
     return this.create(dto, userId, UserRole.SALER);
   }
 
-  async updateSale(
-    saleId: string,
-    dto: UpdateSaleDto,
-    userId: string,
-    role: UserRole
-  ): Promise<SaleEntity> {
+  async updateSale(saleId: string, dto: UpdateSaleDto, userId: string, role: UserRole): Promise<SaleEntity> {
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
-
     try {
-      const sale = await queryRunner.manager.findOne(SaleEntity, {
-        where: { id: saleId },
-        relations: ['items'],
-      });
-
+      const sale = await queryRunner.manager.findOne(SaleEntity, { where: { id: saleId }, relations: ['items'] });
       if (!sale) throw new NotFoundException('Sale not found');
-      if (sale.status !== SaleStatus.DRAFT) {
-        throw new BadRequestException('Can only update DRAFT sales');
-      }
+      if (sale.status !== SaleStatus.DRAFT) throw new BadRequestException('Can only update DRAFT sales');
 
-      // Update items
       for (const itemDto of dto.items) {
-        const item = await queryRunner.manager.findOne(SaleItemEntity, {
-          where: { id: itemDto.itemId },
-        });
-
+        const item = await queryRunner.manager.findOne(SaleItemEntity, { where: { id: itemDto.itemId } });
         if (!item) throw new NotFoundException('Sale item not found');
-
         if (itemDto.customUnitPrice !== undefined) {
           item.customUnitPrice = itemDto.customUnitPrice;
           item.customTotal = item.customUnitPrice * item.quantity;
         }
-
-        if (itemDto.discountAmount !== undefined) {
-          item.discountAmount = itemDto.discountAmount;
-        }
-
+        if (itemDto.discountAmount !== undefined) item.discountAmount = itemDto.discountAmount;
         await queryRunner.manager.save(item);
       }
 
-      // Recalculate totals
-      const items = await queryRunner.manager.find(SaleItemEntity, {
-        where: { saleId: sale.id },
-      });
-
+      const items = await queryRunner.manager.find(SaleItemEntity, { where: { saleId: sale.id } });
       sale.subtotal = items.reduce((sum, i) => sum + Number(i.customTotal), 0);
       sale.totalDiscount = items.reduce((sum, i) => sum + Number(i.discountAmount), 0);
       sale.grandTotal = sale.subtotal - sale.totalDiscount;
-
-      if (dto.notes !== undefined) {
-        sale.notes = dto.notes;
-      }
-
+      if (dto.notes !== undefined) sale.notes = dto.notes;
       await queryRunner.manager.save(sale);
       await queryRunner.commitTransaction();
-
       return this.findOne(sale.id);
     } catch (error) {
       await queryRunner.rollbackTransaction();
@@ -123,18 +89,14 @@ export class SalesService {
     return this.findOne(saleId);
   }
 
-  // ─── Asosiy biznes logika metodlari ──────────────────────
   private async generateSaleNumber(): Promise<string> {
     const now = new Date();
     const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
-
-    // TUZATISH: withDeleted() qo'shish - barcha yozuvlarni sanash
     const count = await this.saleRepository
       .createQueryBuilder('sale')
-      .withDeleted()  // O'chirilgan yozuvlarni ham sanash
+      .withDeleted()
       .where('"sale"."saleNumber" LIKE :pattern', { pattern: `SALE-${dateStr}-%` })
       .getCount();
-
     return `SALE-${dateStr}-${String(count + 1).padStart(4, '0')}`;
   }
 
@@ -142,20 +104,15 @@ export class SalesService {
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
-
     try {
       const productIds = dto.items.map((i) => i.productId);
       const products = await queryRunner.manager.find(ProductEntity, {
         where: { id: In(productIds) },
         relations: ['category'],
       });
-
-      if (products.length !== productIds.length) {
-        throw new NotFoundException('One or more products not found');
-      }
+      if (products.length !== productIds.length) throw new NotFoundException('One or more products not found');
 
       const productMap = new Map(products.map((p) => [p.id, p]));
-
       const saleNumber = await this.generateSaleNumber();
       const sale = queryRunner.manager.create(SaleEntity, {
         saleNumber,
@@ -165,9 +122,7 @@ export class SalesService {
       });
       await queryRunner.manager.save(sale);
 
-      let subtotal = 0;
-      let totalDiscount = 0;
-      let grossProfit = 0;
+      let subtotal = 0, totalDiscount = 0, grossProfit = 0;
 
       for (const itemDto of dto.items) {
         const product = productMap.get(itemDto.productId)!;
@@ -200,7 +155,6 @@ export class SalesService {
           customTotal,
           discountAmount,
         });
-
         await queryRunner.manager.save(item);
         subtotal += customTotal;
         totalDiscount += discountAmount;
@@ -213,7 +167,6 @@ export class SalesService {
       sale.grossProfit = grossProfit;
       sale.netProfit = grossProfit - totalDiscount;
       await queryRunner.manager.save(sale);
-
       await queryRunner.commitTransaction();
 
       await this.auditLogService.log({
@@ -233,155 +186,7 @@ export class SalesService {
     }
   }
 
-  // ✅ TUZATILGAN METOD - FOR UPDATE muammosi hal qilindi
   async completeSale(saleId: string, dto: CompleteSaleDto, userId: string): Promise<SaleEntity> {
-    console.log('🔍 Received DTO:', JSON.stringify(dto, null, 2));
-  console.log('🔍 DTO validation:', {
-    paymentsCount: dto.payments?.length,
-    firstPayment: dto.payments?.[0],
-    methodType: typeof dto.payments?.[0]?.method,
-    amountType: typeof dto.payments?.[0]?.amount,
-  });
-  const queryRunner = this.dataSource.createQueryRunner();
-  await queryRunner.connect();
-  await queryRunner.startTransaction();
-
-  try {
-    const sale = await queryRunner.manager.findOne(SaleEntity, {
-      where: { id: saleId },
-      relations: ['items'],
-    });
-
-    if (!sale) throw new NotFoundException('Sale not found');
-    if (sale.status !== SaleStatus.DRAFT) {
-      throw new BadRequestException('Sale is not in DRAFT status');
-    }
-
-    const paymentTotal = dto.payments.reduce((sum, p) => sum + p.amount, 0);
-    const grandTotal = Number(sale.grandTotal);
-
-    if (Math.abs(paymentTotal - grandTotal) > 0.01) {
-      throw new BadRequestException('Payment total must equal grand total');
-    }
-
-    const debtPayment = dto.payments.find((p) => p.method === PaymentMethod.DEBT);
-    if (debtPayment && (!dto.debtorName || !dto.debtorPhone)) {
-      throw new BadRequestException('Debtor info required for debt payment');
-    }
-
-    // ✅ YANGI YECHIM: QueryBuilder bilan lock qilish
-    for (const item of sale.items) {
-      if (!item.productId) {
-        throw new BadRequestException('Sale item has no productId');
-      }
-
-      // ✅ QueryBuilder ishlatish - relations UMUMAN yo'q
-      const product = await queryRunner.manager
-        .createQueryBuilder(ProductEntity, 'product')
-        .where('product.id = :id', { id: item.productId })
-        .setLock('pessimistic_write') // Lock faqat products jadvaliga
-        .getOne();
-
-      if (!product) {
-        throw new NotFoundException(`Product ${item.productNameSnapshot} not found`);
-      }
-
-      const currentStock = Number(product.stockQuantity);
-      const required = Number(item.quantity);
-
-      if (currentStock < required) {
-        throw new BadRequestException(
-          `Insufficient stock for ${item.productNameSnapshot}. Available: ${currentStock}, Required: ${required}`
-        );
-      }
-
-      // Stock ni kamaytirish
-      product.stockQuantity = currentStock - required;
-      await queryRunner.manager.save(ProductEntity, product);
-
-      // Inventory transaction
-      const transaction = queryRunner.manager.create(InventoryTransactionEntity, {
-        productId: product.id,
-        type: InventoryTransactionType.SALE,
-        quantity: -required,
-        stockBefore: currentStock,
-        stockAfter: currentStock - required,
-        referenceId: sale.id,
-        referenceType: 'sale',
-        notes: `Sale ${sale.saleNumber}`,
-      });
-      await queryRunner.manager.save(transaction);
-    }
-
-    // Record payments
-    console.log('💰 Recording payments for sale:', sale.id);
-
-for (const p of dto.payments) {
-  console.log('💰 Payment data:', { 
-    saleId: sale.id, 
-    method: p.method, 
-    amount: p.amount 
-  });
-
-  const payment = queryRunner.manager.create(PaymentEntity, {
-    saleId: sale.id, // ✅ Sale ID mavjud
-    amount: p.amount,
-    method: p.method,
-    notes: p.notes || null,
-  });
-
-  const savedPayment = await queryRunner.manager.save(PaymentEntity, payment);
-  console.log('✅ Payment saved:', savedPayment.id);
-}
-
-    // Create debt if applicable
-    if (debtPayment) {
-  const debt = queryRunner.manager.create(DebtEntity, {
-    saleId: sale.id,
-    debtorName: dto.debtorName!,
-    debtorPhone: dto.debtorPhone!,
-    originalAmount: debtPayment.amount,
-    remainingAmount: debtPayment.amount,
-    status: DebtStatus.PENDING,
-    notes: dto.debtNotes,
-  });
-  await queryRunner.manager.save(debt);
-}
-
-    sale.status = SaleStatus.COMPLETED;
-sale.completedAt = new Date();
-
-// Faqat sale jadvalini yangilash (payments ga tegmaydi)
-await queryRunner.manager
-  .createQueryBuilder()
-  .update(SaleEntity)
-  .set({
-    status: SaleStatus.COMPLETED,
-    completedAt: new Date(),
-  })
-  .where('id = :id', { id: sale.id })
-  .execute();
-
-await queryRunner.commitTransaction();
-
-await this.auditLogService.log({
-  userId,
-  action: AuditAction.SALE_COMPLETED,
-  entity: AuditEntityEnum.SALE,
-  entityId: sale.id,
-  afterSnapshot: { status: SaleStatus.COMPLETED },
-});
-
-return this.findOne(sale.id);
-  } catch (error) {
-    await queryRunner.rollbackTransaction();
-    throw error;
-  } finally {
-    await queryRunner.release();
-  }
-}
-
-  async cancel(saleId: string, reason: string, userId: string): Promise<SaleEntity> {
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
@@ -393,34 +198,184 @@ return this.findOne(sale.id);
       });
 
       if (!sale) throw new NotFoundException('Sale not found');
-      if (sale.status === SaleStatus.CANCELLED) {
-        throw new BadRequestException('Sale already cancelled');
+      if (sale.status !== SaleStatus.DRAFT) throw new BadRequestException('Sale is not in DRAFT status');
+
+      const paymentTotal = dto.payments.reduce((sum, p) => sum + p.amount, 0);
+      const grandTotal = Number(sale.grandTotal);
+
+      if (Math.abs(paymentTotal - grandTotal) > 0.01) {
+        throw new BadRequestException('Payment total must equal grand total');
       }
 
-      // Reverse inventory if completed
+      const debtPayment = dto.payments.find((p) => p.method === PaymentMethod.DEBT);
+      const resolvedCustomerName = dto.customerName || dto.debtorName;
+      const resolvedCustomerPhone = dto.customerPhone || dto.debtorPhone;
+
+      if (debtPayment && (!resolvedCustomerName || !resolvedCustomerPhone)) {
+        throw new BadRequestException('Debtor info required for debt payment');
+      }
+
+      // ── Inventory ─────────────────────────────────────────
+      for (const item of sale.items) {
+        if (!item.productId) throw new BadRequestException('Sale item has no productId');
+
+        const product = await queryRunner.manager
+          .createQueryBuilder(ProductEntity, 'product')
+          .where('product.id = :id', { id: item.productId })
+          .setLock('pessimistic_write')
+          .getOne();
+
+        if (!product) throw new NotFoundException(`Product ${item.productNameSnapshot} not found`);
+
+        const currentStock = parseFloat(String(product.stockQuantity));
+        const required     = parseFloat(String(item.quantity));
+
+        if (currentStock < required) {
+          throw new BadRequestException(
+            `${item.productNameSnapshot} uchun yetarli qoldiq yo'q. Mavjud: ${currentStock}, Kerak: ${required}`,
+          );
+        }
+
+        const newStock = parseFloat((currentStock - required).toFixed(3));
+
+        // ✅ FIX: save() o'rniga raw SQL — TypeORM int cache bypass
+        await queryRunner.query(
+          `UPDATE products SET stock_quantity = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+          [newStock, product.id],
+        );
+
+        const transaction = queryRunner.manager.create(InventoryTransactionEntity, {
+          productId: product.id,
+          type: InventoryTransactionType.SALE,
+          quantity: -required,
+          stockBefore: currentStock,
+          stockAfter: newStock,
+          referenceId: sale.id,
+          referenceType: 'sale',
+          notes: `Sale ${sale.saleNumber}`,
+        });
+        await queryRunner.manager.save(transaction);
+      }
+
+      // ── Payments ──────────────────────────────────────────
+      for (const p of dto.payments) {
+        const payment = queryRunner.manager.create(PaymentEntity, {
+          saleId: sale.id,
+          amount: p.amount,
+          method: p.method,
+          notes: p.notes || null,
+        });
+        await queryRunner.manager.save(PaymentEntity, payment);
+      }
+
+      // ── Mijozni topish yoki yaratish ──────────────────────
+      let customerId: string | null = null;
+
+      if (dto.customerId) {
+        customerId = dto.customerId;
+      } else if (resolvedCustomerName && resolvedCustomerPhone) {
+        let customer = await queryRunner.manager.findOne(CustomerEntity, {
+          where: { phone: resolvedCustomerPhone },
+        });
+
+        if (!customer) {
+          customer = queryRunner.manager.create(CustomerEntity, {
+            name: resolvedCustomerName,
+            phone: resolvedCustomerPhone,
+          });
+          customer = await queryRunner.manager.save(CustomerEntity, customer);
+        } else if (customer.name !== resolvedCustomerName) {
+          customer.name = resolvedCustomerName;
+          customer = await queryRunner.manager.save(CustomerEntity, customer);
+        }
+
+        customerId = customer.id;
+      }
+
+      // ── Debt yaratish ─────────────────────────────────────
+      if (debtPayment) {
+        const debt = queryRunner.manager.create(DebtEntity, {
+          saleId: sale.id,
+          debtorName: resolvedCustomerName!,
+          debtorPhone: resolvedCustomerPhone!,
+          originalAmount: debtPayment.amount,
+          remainingAmount: debtPayment.amount,
+          status: DebtStatus.PENDING,
+          notes: dto.debtNotes,
+        });
+        await queryRunner.manager.save(debt);
+      }
+
+      // ── Sale ni yangilash ─────────────────────────────────
+      await queryRunner.manager
+        .createQueryBuilder()
+        .update(SaleEntity)
+        .set({
+          status: SaleStatus.COMPLETED,
+          completedAt: new Date(),
+          ...(customerId ? { customerId } : {}),
+        })
+        .where('id = :id', { id: sale.id })
+        .execute();
+
+      await queryRunner.commitTransaction();
+
+      await this.auditLogService.log({
+        userId,
+        action: AuditAction.SALE_COMPLETED,
+        entity: AuditEntityEnum.SALE,
+        entityId: sale.id,
+        afterSnapshot: {
+          status: SaleStatus.COMPLETED,
+          saleNumber: sale.saleNumber,
+          grandTotal: Number(sale.grandTotal),
+          customerName: resolvedCustomerName || null,
+          customerPhone: resolvedCustomerPhone || null,
+        },
+      });
+
+      return this.findOne(sale.id);
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  async cancel(saleId: string, reason: string, userId: string): Promise<SaleEntity> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+    try {
+      const sale = await queryRunner.manager.findOne(SaleEntity, { where: { id: saleId }, relations: ['items'] });
+      if (!sale) throw new NotFoundException('Sale not found');
+      if (sale.status === SaleStatus.CANCELLED) throw new BadRequestException('Sale already cancelled');
+
       if (sale.status === SaleStatus.COMPLETED) {
         for (const item of sale.items) {
-          if (!item.productId) {
-            throw new BadRequestException('Sale item has no productId');
-          }
-
+          if (!item.productId) throw new BadRequestException('Sale item has no productId');
           const product = await queryRunner.manager.findOne(ProductEntity, {
             where: { id: item.productId },
             lock: { mode: 'pessimistic_write' },
           });
-
           if (product) {
-            const stockBefore = Number(product.stockQuantity);
-            const restore = Number(item.quantity);
-            product.stockQuantity = stockBefore + restore;
-            await queryRunner.manager.save(product);
+            const stockBefore = parseFloat(String(product.stockQuantity));
+            const restore     = parseFloat(String(item.quantity));
+            const stockAfter  = parseFloat((stockBefore + restore).toFixed(3));
+
+            // ✅ FIX: raw SQL
+            await queryRunner.query(
+              `UPDATE products SET stock_quantity = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+              [stockAfter, product.id],
+            );
 
             const transaction = queryRunner.manager.create(InventoryTransactionEntity, {
               productId: product.id,
               type: InventoryTransactionType.ADJUSTMENT,
               quantity: restore,
               stockBefore,
-              stockAfter: stockBefore + restore,
+              stockAfter,
               referenceId: sale.id,
               referenceType: 'sale_cancellation',
               notes: `Cancelled ${sale.saleNumber}`,
@@ -434,7 +389,6 @@ return this.findOne(sale.id);
       sale.cancelledAt = new Date();
       sale.cancellationReason = reason;
       await queryRunner.manager.save(sale);
-
       await queryRunner.commitTransaction();
 
       await this.auditLogService.log({
@@ -456,35 +410,24 @@ return this.findOne(sale.id);
 
   async findAll(pagination: SaleQueryDto): Promise<PaginatedResponseDto<SaleEntity>> {
     const { page = 1, limit = 20, search, status } = pagination;
-
     const query = this.saleRepository
       .createQueryBuilder('sale')
       .leftJoinAndSelect('sale.createdBy', 'user')
       .leftJoinAndSelect('sale.items', 'items')
       .orderBy('sale.created_at', 'DESC');
 
-    if (search) {
-      query.andWhere('sale.sale_number LIKE :search', { search: `%${search}%` });
-    }
+    if (search) query.andWhere('sale.sale_number LIKE :search', { search: `%${search}%` });
+    if (status) query.andWhere('sale.status = :status', { status });
 
-    if (status) {
-      query.andWhere('sale.status = :status', { status });
-    }
-
-    const [sales, total] = await query
-      .skip((page - 1) * limit)
-      .take(limit)
-      .getManyAndCount();
-
+    const [sales, total] = await query.skip((page - 1) * limit).take(limit).getManyAndCount();
     return PaginatedResponseDto.create(sales, total, page, limit);
   }
 
   async findOne(id: string): Promise<SaleEntity> {
     const sale = await this.saleRepository.findOne({
       where: { id },
-      relations: ['createdBy', 'items', 'items.product', 'payments', 'debt'],
+      relations: ['createdBy', 'items', 'items.product', 'payments', 'debt', 'customer'],
     });
-
     if (!sale) throw new NotFoundException('Sale not found');
     return sale;
   }

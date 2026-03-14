@@ -17,7 +17,7 @@ type LoginForm = z.infer<typeof loginSchema>;
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const { login } = useAuthStore();
+  useAuthStore();
   
   const { register, handleSubmit, formState: { errors } } = useForm<LoginForm>({
     resolver: zodResolver(loginSchema),
@@ -26,28 +26,25 @@ export function LoginPage() {
   const mutation = useMutation({
     mutationFn: authApi.login,
     onSuccess: (res) => {
-      console.log('✅ Login muvaffaqiyatli:', res); // Debug
       
-      // ✅ Token va user saqlanadi
-      login(res.data.user, res.data.accessToken);
+      
+      
       
       toast.success('Xush kelibsiz!');
       
-      console.log('🚀 Dashboard ga yo\'naltirilmoqda...'); // Debug
       
-      // ✅ Dashboard ga yo'naltirish
-      navigate('/dashboard', { replace: true });
+      navigate(res.data.user.role === 'SALER' ? '/sales' : '/dashboard', { replace: true });
       
-      console.log('✅ Navigate chaqirildi'); // Debug
+      
     },
-    onError: (error: any) => {
-      console.error('❌ Login xatosi:', error); // Debug
+    onError: () => {
+     
       toast.error('Ism yoki parol noto\'g\'ri');
     }
   });
 
   const onSubmit = (data: LoginForm) => {
-    console.log('📤 Login ma\'lumotlari yuborilmoqda:', data); // Debug
+   
     mutation.mutate(data);
   };
 

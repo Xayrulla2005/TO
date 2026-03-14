@@ -1,42 +1,31 @@
-// src/sale/dto/create-sale.dto.ts
-
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
-  IsString,
-  IsNotEmpty,
-  IsNumber,
-  Min,
-  IsArray,
-  ValidateNested,
-  IsOptional,
-  IsEnum,
-  ArrayNotEmpty,
-  IsUUID,
+  IsString, IsNotEmpty, IsNumber, Min, IsArray,
+  ValidateNested, IsOptional, IsEnum, ArrayNotEmpty, IsUUID,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PaymentMethod } from '../../payments/entities/payment.entity';
 
-// ─── Sale Item Input ────────────────────────────────────────
 export class SaleItemInputDto {
-  @ApiProperty({ description: 'Product UUID' })
+  @ApiProperty()
   @IsUUID()
   @IsNotEmpty()
   productId!: string;
 
-  @ApiProperty({ example: 2, description: 'Quantity' })
+  @ApiProperty({ example: 2 })
   @IsNumber()
   @Min(0.01)
   @Type(() => Number)
   quantity!: number;
 
-  @ApiPropertyOptional({ description: 'Custom unit price (overrides product base price). SALER can only set this.' })
+  @ApiPropertyOptional()
   @IsOptional()
   @IsNumber()
   @Min(0)
   @Type(() => Number)
   customUnitPrice?: number;
 
-  @ApiPropertyOptional({ example: 5, description: 'Discount amount per item' })
+  @ApiPropertyOptional()
   @IsOptional()
   @IsNumber()
   @Min(0)
@@ -44,28 +33,26 @@ export class SaleItemInputDto {
   discountAmount?: number;
 }
 
-// ─── Create Sale (DRAFT) ────────────────────────────────────
 export class CreateSaleDto {
-  @ApiProperty({ description: 'Array of sale items' })
+  @ApiProperty()
   @IsArray()
-  @ArrayNotEmpty({ message: 'Sale must have at least one item' })
+  @ArrayNotEmpty()
   @ValidateNested({ each: true })
   @Type(() => SaleItemInputDto)
   items!: SaleItemInputDto[];
 
-  @ApiPropertyOptional({ description: 'Notes for the sale' })
+  @ApiPropertyOptional()
   @IsOptional()
   @IsString()
   notes?: string;
 }
 
-// ─── Payment Input ──────────────────────────────────────────
 export class PaymentInputDto {
   @ApiProperty({ enum: PaymentMethod })
   @IsEnum(PaymentMethod)
   method!: PaymentMethod;
 
-  @ApiProperty({ example: 100.00 })
+  @ApiProperty()
   @IsNumber()
   @Min(0.01)
   @Type(() => Number)
@@ -77,63 +64,74 @@ export class PaymentInputDto {
   notes?: string;
 }
 
-// ─── Complete Sale (triggers inventory decrease) ───────────
 export class CompleteSaleDto {
-  @ApiProperty({ 
-    description: 'Payment entries for this sale',
-    type: [PaymentInputDto],
-  })
+  @ApiProperty({ type: [PaymentInputDto] })
   @IsArray()
-  @ArrayNotEmpty({ message: 'At least one payment method is required' })
+  @ArrayNotEmpty()
   @ValidateNested({ each: true })
   @Type(() => PaymentInputDto)
   payments!: PaymentInputDto[];
 
-  @ApiPropertyOptional({ description: 'Debtor name (required if any payment is DEBT)' })
+  // ── Mavjud mijoz ID si ─────────────────────────────────
+  @ApiPropertyOptional({ description: 'Existing customer UUID' })
+  @IsOptional()
+  @IsUUID()
+  customerId?: string;
+
+  // ── Yangi mijoz yoki qarz uchun ────────────────────────
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  customerName?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  customerPhone?: string;
+
+  // ── Qarz uchun (eski fieldlar - backward compat) ───────
+  @ApiPropertyOptional()
   @IsOptional()
   @IsString()
   debtorName?: string;
 
-  @ApiPropertyOptional({ description: 'Debtor phone (required if any payment is DEBT)' })
+  @ApiPropertyOptional()
   @IsOptional()
   @IsString()
   debtorPhone?: string;
 
-  @ApiPropertyOptional({ description: 'Due date for debt payment (ISO date string)' })
+  @ApiPropertyOptional()
   @IsOptional()
   @IsString()
   debtDueDate?: string;
 
-  @ApiPropertyOptional({ description: 'Notes for debt' })
+  @ApiPropertyOptional()
   @IsOptional()
   @IsString()
   debtNotes?: string;
-
 }
 
-// ─── Cancel Sale ────────────────────────────────────────────
 export class CancelSaleDto {
-  @ApiPropertyOptional({ description: 'Reason for cancellation' })
+  @ApiPropertyOptional()
   @IsOptional()
   @IsString()
   reason?: string;
 }
 
-// ─── Update Sale Item ───────────────────────────────────────
 export class UpdateSaleItemDto {
-  @ApiProperty({ description: 'Sale item UUID' })
+  @ApiProperty()
   @IsUUID()
   @IsNotEmpty()
   itemId!: string;
 
-  @ApiPropertyOptional({ description: 'Custom unit price override' })
+  @ApiPropertyOptional()
   @IsOptional()
   @IsNumber()
   @Min(0)
   @Type(() => Number)
   customUnitPrice?: number;
 
-  @ApiPropertyOptional({ description: 'Discount amount' })
+  @ApiPropertyOptional()
   @IsOptional()
   @IsNumber()
   @Min(0)

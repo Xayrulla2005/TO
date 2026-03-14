@@ -56,7 +56,9 @@ export const UserFormModal = ({
     // Telefon validatsiyasi
     const phoneRegex = /^\+998\d{9}$/;
     if (!phoneRegex.test(formData.phone)) {
-      alert("Telefon raqami noto'g'ri formatda!\nTo'g'ri format: +998901234567");
+      alert(
+        "Telefon raqami noto'g'ri formatda!\nTo'g'ri format: +998901234567",
+      );
       return;
     }
 
@@ -132,9 +134,13 @@ export const UserFormModal = ({
               autoComplete="off"
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               value={formData.fullName}
-              onChange={(e) =>
-                setFormData({ ...formData, fullName: e.target.value })
-              }
+              onChange={(e) => {
+                const v = e.target.value;
+                setFormData({
+                  ...formData,
+                  fullName: v.charAt(0).toUpperCase() + v.slice(1),
+                });
+              }}
             />
           </div>
 

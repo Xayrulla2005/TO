@@ -15,6 +15,15 @@ import { Plus, Edit, Trash2, Search, Package, AlertTriangle } from 'lucide-react
 import { formatCurrency } from '../shared/lib/utils';
 import { Product } from '../shared/types/product';
 
+// ✅ O'lchov birligi label
+const UNIT_LABELS: Record<string, string> = {
+  piece: 'dona',
+  meter: 'metr',
+  kg:    'kg',
+  litre: 'litr',
+  pack:  'paket',
+};
+
 export function ProductsPage() {
   const { user } = useAuthStore();
   const isAdmin = user?.role === 'ADMIN';
@@ -62,7 +71,7 @@ export function ProductsPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Mahsulotlar ombori</h1>
-          <p className="text-gray-500">{products?.length || 0} ta mahsulotni boshqarish</p>
+          <p className="text-gray-500">{products?.length || 0} ta mahsulot</p>
         </div>
         {isAdmin && (
           <Button leftIcon={<Plus size={18} />} onClick={handleCreate}>
@@ -72,7 +81,7 @@ export function ProductsPage() {
       </div>
 
       <Card>
-        <div className="p-4 border-b border-gray-100 flex gap-4">
+        <div className="p-4 border-b border-gray-100">
           <div className="w-full sm:max-w-xs">
             <Input
               placeholder="Mahsulot qidirish..."
@@ -88,6 +97,7 @@ export function ProductsPage() {
             <TableRow>
               <TableHead>Mahsulot</TableHead>
               <TableHead>Kategoriya</TableHead>
+              <TableHead>O'lchov</TableHead>
               <TableHead>Kelish narxi</TableHead>
               <TableHead>Sotuv narxi</TableHead>
               <TableHead>Qoldiq</TableHead>
@@ -115,19 +125,33 @@ export function ProductsPage() {
                     {product.category?.name || 'Kategoriyasiz'}
                   </span>
                 </TableCell>
-                <TableCell>{formatCurrency(product.purchasePrice)}</TableCell>
+                {/* ✅ O'lchov birligi badge */}
+                <TableCell>
+                  <span className="inline-flex px-2 py-1 bg-indigo-50 text-indigo-700 rounded-md text-xs font-semibold">
+                    {UNIT_LABELS[product.unit] || product.unit || 'dona'}
+                  </span>
+                </TableCell>
+                <TableCell className="text-gray-600">
+                  {formatCurrency(product.purchasePrice)}
+                </TableCell>
                 <TableCell className="font-medium text-indigo-600">
                   {formatCurrency(product.salePrice)}
                 </TableCell>
                 <TableCell>
-                  {/* ✅ TUZATILDI: stockQty → stockQuantity */}
-                  <span className={product.stockQuantity <= (product.minStockLimit ?? 5) ? "text-red-600 font-bold" : "text-gray-700"}>
-                    {product.stockQuantity}
+                  <span className={
+                    product.stockQuantity <= (product.minStockLimit ?? 5)
+                      ? 'text-red-600 font-bold'
+                      : 'text-gray-700'
+                  }>
+                    {product.stockQuantity}{' '}
+                    <span className="text-gray-400 text-xs font-normal">
+                      {UNIT_LABELS[product.unit] || ''}
+                    </span>
                   </span>
                 </TableCell>
                 <TableCell>
                   <Badge variant={product.stockQuantity > 0 ? 'success' : 'danger'}>
-                    {product.stockQuantity > 0 ? 'Omborda bor' : "Omborda yo'q"}
+                    {product.stockQuantity > 0 ? 'Mavjud' : "Tugagan"}
                   </Badge>
                 </TableCell>
                 {isAdmin && (
@@ -152,7 +176,7 @@ export function ProductsPage() {
             ))}
             {filteredProducts.length === 0 && (
               <TableRow>
-                <TableCell colSpan={isAdmin ? 7 : 6} className="text-center py-8 text-gray-500">
+                <TableCell colSpan={isAdmin ? 8 : 7} className="text-center py-8 text-gray-500">
                   Mahsulot topilmadi.
                 </TableCell>
               </TableRow>
@@ -178,8 +202,8 @@ export function ProductsPage() {
             <AlertTriangle size={24} />
             <p className="text-sm font-medium">Mahsulot butunlay o'chirilsinmi?</p>
           </div>
-          <p className="text-gray-600">
-            Bu amalni ortga qaytarib bo'lmaydi. Ushbu mahsulot bo'yicha savdo tarixi audit jurnali uchun saqlanib qolishi mumkin.
+          <p className="text-gray-600 text-sm">
+            Bu amalni ortga qaytarib bo'lmaydi.
           </p>
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => setDeletingId(null)}>Bekor qilish</Button>
@@ -188,7 +212,7 @@ export function ProductsPage() {
               isLoading={deleteMutation.isPending}
               onClick={() => deletingId && deleteMutation.mutate(deletingId)}
             >
-              Mahsulotni o'chirish
+              O'chirish
             </Button>
           </div>
         </div>

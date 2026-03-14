@@ -7,7 +7,7 @@ import { Input } from '../shared/ui/Input';
 import { Button } from '../shared/ui/Button';
 import { Card } from '../shared/ui/Card';
 import { toast } from '../shared/ui/Toast';
-import { Search, ShoppingCart, Trash2, Package, X, ChevronUp } from 'lucide-react';
+import { Search, ShoppingCart, Trash2, Package, X, ChevronUp, AlertTriangle } from 'lucide-react';
 import { Product } from '../shared/types/product';
 import { PaymentModal, PaymentData } from '../features/sales/PaymentModal';
 
@@ -17,7 +17,6 @@ interface CartItem {
   unitPrice: number;
 }
 
-// ── $ bilan formatlash, ortiqcha nolsiz ──
 function fmt(val: number | string | null | undefined): string {
   const n = Number(val) || 0;
   const formatted = n % 1 === 0
@@ -26,7 +25,11 @@ function fmt(val: number | string | null | undefined): string {
   return '$' + formatted;
 }
 
-// ── Tartiblash: raqamlar o'sib borish, keyin alifbe ──
+// Keraksiz nollarni olib tashlash: 20.0000 → 20, 1.5000 → 1.5
+function fmtQty(val: number | string | null | undefined): string {
+  return String(parseFloat(parseFloat(String(val || 0)).toFixed(4)));
+}
+
 function sortProducts(list: Product[]): Product[] {
   return [...list].sort((a, b) => {
     const aNum = /^\d/.test(a.name);
@@ -78,13 +81,13 @@ export function SalesPage() {
       if (paymentData.cardAmount > 0) payments.push({ method: 'CARD', amount: paymentData.cardAmount });
       if (paymentData.debtAmount > 0) payments.push({ method: 'DEBT', amount: paymentData.debtAmount });
 
-       return salesApi.complete(draftSale.id, {
-       payments,
-       debtorName: paymentData.customerName,
-       debtorPhone: paymentData.customerPhone,
-       agreedTotal: grandTotal !== subtotal ? grandTotal : undefined,
+      return salesApi.complete(draftSale.id, {
+        payments,
+        customerId: paymentData.customerId || undefined,
+        customerName: paymentData.customerName || undefined,
+        customerPhone: paymentData.customerPhone || undefined,
+        agreedTotal: grandTotal !== subtotal ? grandTotal : undefined,
       });
-
     },
     onSuccess: async (sale) => {
       toast.success('Savdo yakunlandi');
@@ -187,9 +190,10 @@ export function SalesPage() {
               </div>
             ) : (
               filteredProducts.map((product: Product) => {
+                const stock = parseFloat(String(product.stockQuantity || 0));
                 const inCart = cart.find(i => i.product.id === product.id);
-                const isOut = product.stockQuantity === 0;
-                const isLow = product.stockQuantity > 0 && product.stockQuantity <= 5;
+                const isOut = stock === 0;
+                const isLow = stock > 0 && stock <= 5;
 
                 return (
                   <div
@@ -213,10 +217,11 @@ export function SalesPage() {
 
                     <div className="flex-1 min-w-0">
                       <p className="font-semibold text-gray-900 text-sm leading-tight line-clamp-2">{product.name}</p>
-                      <p className={`text-xs mt-0.5 font-medium ${
+                      <p className={`text-xs mt-0.5 font-medium flex items-center gap-1 ${
                         isOut ? 'text-red-500' : isLow ? 'text-orange-500' : 'text-gray-400'
                       }`}>
-                        {isOut ? '⚠ Tugagan' : isLow ? `⚠ ${product.stockQuantity} ta qoldi` : `${product.stockQuantity} ta`}
+                        {(isOut || isLow) && <AlertTriangle size={11} className="flex-shrink-0" />}
+                        {isOut ? 'Tugagan' : isLow ? `${fmtQty(stock)} ta qoldi` : `${fmtQty(stock)} ta`}
                       </p>
                     </div>
 
@@ -224,7 +229,7 @@ export function SalesPage() {
                       <p className="font-bold text-indigo-600 text-sm">{fmt(product.salePrice)}</p>
                       {inCart && (
                         <span className="inline-block mt-0.5 bg-indigo-600 text-white text-xs px-1.5 py-0.5 rounded-full font-bold">
-                          {inCart.qty} ta
+                          {fmtQty(inCart.qty)} ta
                         </span>
                       )}
                     </div>
@@ -242,7 +247,7 @@ export function SalesPage() {
               <h2 className="font-bold text-base flex items-center gap-2 text-gray-800">
                 <ShoppingCart size={18} className="text-indigo-600" /> Joriy savdo
               </h2>
-              <span className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full text-xs font-bold">{totalItems} ta</span>
+              <span className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full text-xs font-bold">{fmtQty(totalItems)} ta</span>
             </div>
 
             <div className="flex-1 overflow-y-auto p-3 space-y-2">
@@ -253,11 +258,19 @@ export function SalesPage() {
                   <p className="text-xs text-gray-400">Mahsulotni bosing</p>
                 </div>
               ) : (
-                cart.map((item) => <CartItemRow key={item.product.id} item={item} onUpdateQty={updateQty} onRemove={removeFromCart} />)
+                cart.map((item) => (
+                  <CartItemRow key={item.product.id} item={item} onUpdateQty={updateQty} onRemove={removeFromCart} />
+                ))
               )}
             </div>
 
-            <CartFooter subtotal={subtotal} cart={cart} onPay={() => setIsPaymentModalOpen(true)} agreedPrice={agreedPrice} onAgreedPriceChange={setAgreedPrice} />
+            <CartFooter
+              subtotal={subtotal}
+              cart={cart}
+              onPay={() => setIsPaymentModalOpen(true)}
+              agreedPrice={agreedPrice}
+              onAgreedPriceChange={setAgreedPrice}
+            />
           </Card>
         </div>
 
@@ -269,7 +282,7 @@ export function SalesPage() {
                 <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
                   <h2 className="font-bold text-base flex items-center gap-2">
                     <ShoppingCart size={18} className="text-indigo-600" /> Joriy savdo
-                    <span className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full text-xs font-bold">{totalItems} ta</span>
+                    <span className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full text-xs font-bold">{fmtQty(totalItems)} ta</span>
                   </h2>
                   <button onClick={() => setIsCartOpen(false)} className="p-1 rounded-lg hover:bg-gray-100">
                     <ChevronUp size={20} className="text-gray-500" />
@@ -282,10 +295,18 @@ export function SalesPage() {
                       <p className="text-sm">Savat bosh</p>
                     </div>
                   ) : (
-                    cart.map((item) => <CartItemRow key={item.product.id} item={item} onUpdateQty={updateQty} onRemove={removeFromCart} />)
+                    cart.map((item) => (
+                      <CartItemRow key={item.product.id} item={item} onUpdateQty={updateQty} onRemove={removeFromCart} />
+                    ))
                   )}
                 </div>
-                <CartFooter subtotal={subtotal} cart={cart} onPay={() => { setIsCartOpen(false); setIsPaymentModalOpen(true); }} agreedPrice={agreedPrice} onAgreedPriceChange={setAgreedPrice} />
+                <CartFooter
+                  subtotal={subtotal}
+                  cart={cart}
+                  onPay={() => { setIsCartOpen(false); setIsPaymentModalOpen(true); }}
+                  agreedPrice={agreedPrice}
+                  onAgreedPriceChange={setAgreedPrice}
+                />
               </div>
             </div>
           ) : (
@@ -297,7 +318,7 @@ export function SalesPage() {
                 <ShoppingCart size={18} />
                 <span className="font-semibold text-sm">Savat</span>
                 {totalItems > 0 && (
-                  <span className="bg-white text-indigo-600 text-xs font-bold px-2 py-0.5 rounded-full">{totalItems} ta</span>
+                  <span className="bg-white text-indigo-600 text-xs font-bold px-2 py-0.5 rounded-full">{fmtQty(totalItems)} ta</span>
                 )}
               </div>
               <span className="font-bold text-sm">{fmt(grandTotal)}</span>
@@ -328,7 +349,10 @@ export function SalesPage() {
             </div>
             <div className="p-3 border-t flex gap-2">
               <button
-                onClick={() => { const iframe = document.querySelector("iframe") as HTMLIFrameElement; iframe?.contentWindow?.print(); }}
+                onClick={() => {
+                  const iframe = document.querySelector('iframe') as HTMLIFrameElement;
+                  iframe?.contentWindow?.print();
+                }}
                 className="flex-1 bg-indigo-600 text-white py-2.5 rounded-xl font-semibold text-sm"
               >
                 Print
@@ -363,7 +387,9 @@ function CartItemRow({ item, onUpdateQty, onRemove }: {
           {item.product.imageUrl ? (
             <img src={item.product.imageUrl} alt={item.product.name} className="w-full h-full object-cover" />
           ) : (
-            <div className="w-full h-full flex items-center justify-center"><Package size={16} className="text-gray-400" /></div>
+            <div className="w-full h-full flex items-center justify-center">
+              <Package size={16} className="text-gray-400" />
+            </div>
           )}
         </div>
         <div className="flex-1 min-w-0">
@@ -397,7 +423,7 @@ function CartItemRow({ item, onUpdateQty, onRemove }: {
             min={0.001}
           />
         </div>
-        <span className="text-gray-300 text-xs">×</span>
+        <span className="text-gray-300 text-xs">x</span>
         <p className="text-xs text-gray-500">{fmt(item.unitPrice)}</p>
         <p className="font-bold text-indigo-600 text-sm flex-shrink-0 ml-auto">{fmt(item.qty * item.unitPrice)}</p>
       </div>

@@ -1,319 +1,366 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { auditApi } from '../features/audit/api/audit.api';
-import { Card } from '../shared/ui/Card';
+import { api } from '../shared/lib/axios';
 import { Input } from '../shared/ui/Input';
-import { LoadingSpinner } from '../shared/ui/Loading';
-import { Search, ShieldAlert, Receipt, Package, User, CreditCard, RotateCcw, LogIn, Settings } from 'lucide-react';
-import { format, parseISO, isValid } from 'date-fns';
-import { formatCurrency } from '../shared/lib/utils';
+import { Modal } from '../shared/ui/Modal';
+import { toast } from '../shared/ui/Toast';
+import { format, parseISO, isToday, isYesterday } from 'date-fns';
+import { uz } from 'date-fns/locale';
+import { Search, ShoppingBag, RotateCcw, User, Package, AlertTriangle, FileText } from 'lucide-react';
+import { useEffect } from 'react';
 
-// Faqat kerakli amallar
-const IMPORTANT_ACTIONS = [
-  'SALE_CREATED', 'SALE_COMPLETED', 'SALE_CANCELLED',
-  'PRICE_OVERRIDE', 'DISCOUNT_APPLIED',
-  'RETURN_CREATED', 'RETURN_APPROVED', 'RETURN_REJECTED',
-  'PAYMENT_RECORDED', 'DEBT_PAYMENT', 'DEBT_CANCELLED',
-  'INVENTORY_ADJUSTED', 'STOCK_DECREASED', 'STOCK_INCREASED',
-  'CREATED', 'UPDATED', 'DELETED',
-  'LOGIN', 'LOGOUT', 'PASSWORD_CHANGED',
-];
-
-const ACTION_CONFIG: Record<string, { label: string; color: string; bg: string; icon: any }> = {
-  SALE_COMPLETED:     { label: 'Sotuv',          color: 'text-emerald-700', bg: 'bg-emerald-50 border-emerald-200', icon: Receipt },
-  SALE_CREATED:       { label: 'Sotuv boshlandi', color: 'text-blue-700',   bg: 'bg-blue-50 border-blue-200',       icon: Receipt },
-  SALE_CANCELLED:     { label: 'Sotuv bekor',     color: 'text-red-700',    bg: 'bg-red-50 border-red-200',         icon: Receipt },
-  PRICE_OVERRIDE:     { label: 'Narx o\'zgartirildi', color: 'text-orange-700', bg: 'bg-orange-50 border-orange-200', icon: CreditCard },
-  DISCOUNT_APPLIED:   { label: 'Chegirma',        color: 'text-purple-700', bg: 'bg-purple-50 border-purple-200',   icon: CreditCard },
-  PAYMENT_RECORDED:   { label: 'To\'lov',         color: 'text-emerald-700', bg: 'bg-emerald-50 border-emerald-200', icon: CreditCard },
-  DEBT_PAYMENT:       { label: 'Qarz to\'lovi',   color: 'text-blue-700',   bg: 'bg-blue-50 border-blue-200',       icon: CreditCard },
-  DEBT_CANCELLED:     { label: 'Qarz bekor',      color: 'text-red-700',    bg: 'bg-red-50 border-red-200',         icon: CreditCard },
-  RETURN_CREATED:     { label: 'Qaytarish',       color: 'text-orange-700', bg: 'bg-orange-50 border-orange-200',   icon: RotateCcw },
-  RETURN_APPROVED:    { label: 'Qaytarish tasdiqlandi', color: 'text-emerald-700', bg: 'bg-emerald-50 border-emerald-200', icon: RotateCcw },
-  RETURN_REJECTED:    { label: 'Qaytarish rad',   color: 'text-red-700',    bg: 'bg-red-50 border-red-200',         icon: RotateCcw },
-  STOCK_DECREASED:    { label: 'Stok kamaydi',    color: 'text-red-700',    bg: 'bg-red-50 border-red-200',         icon: Package },
-  STOCK_INCREASED:    { label: 'Stok ko\'paydi',  color: 'text-emerald-700', bg: 'bg-emerald-50 border-emerald-200', icon: Package },
-  INVENTORY_ADJUSTED: { label: 'Inventar',        color: 'text-blue-700',   bg: 'bg-blue-50 border-blue-200',       icon: Package },
-  CREATED:            { label: 'Yaratildi',       color: 'text-blue-700',   bg: 'bg-blue-50 border-blue-200',       icon: Settings },
-  UPDATED:            { label: 'Yangilandi',      color: 'text-amber-700',  bg: 'bg-amber-50 border-amber-200',     icon: Settings },
-  DELETED:            { label: 'O\'chirildi',     color: 'text-red-700',    bg: 'bg-red-50 border-red-200',         icon: Settings },
-  LOGIN:              { label: 'Kirish',          color: 'text-gray-700',   bg: 'bg-gray-50 border-gray-200',       icon: LogIn },
-  LOGOUT:             { label: 'Chiqish',         color: 'text-gray-700',   bg: 'bg-gray-50 border-gray-200',       icon: LogIn },
-  PASSWORD_CHANGED:   { label: 'Parol o\'zgardi', color: 'text-amber-700',  bg: 'bg-amber-50 border-amber-200',     icon: User },
+const ACTION_CONFIG: Record<string, {
+  label: string; icon: any; iconColor: string; bgColor: string; borderColor: string;
+}> = {
+  SALE_COMPLETED: {
+    label: 'Sotuv', icon: ShoppingBag,
+    iconColor: 'text-indigo-600', bgColor: 'bg-indigo-50', borderColor: 'border-indigo-100',
+  },
+  DEBT_PAYMENT: {
+    label: "Qarz to'lovi", icon: AlertTriangle,
+    iconColor: 'text-amber-600', bgColor: 'bg-amber-50', borderColor: 'border-amber-100',
+  },
+  SALE_RETURNED: {
+    label: 'Qaytarish', icon: RotateCcw,
+    iconColor: 'text-red-500', bgColor: 'bg-red-50', borderColor: 'border-red-100',
+  },
+  STOCK_ADJUSTED: {
+    label: 'Stok', icon: Package,
+    iconColor: 'text-emerald-600', bgColor: 'bg-emerald-50', borderColor: 'border-emerald-100',
+  },
+  USER_CREATED: {
+    label: 'Tizim', icon: User,
+    iconColor: 'text-gray-500', bgColor: 'bg-gray-50', borderColor: 'border-gray-100',
+  },
 };
 
-const ENTITY_LABELS: Record<string, string> = {
-  SALE: 'Sotuv', SALE_ITEM: 'Sotuv', PAYMENT: "To'lov",
-  DEBT: 'Qarz', RETURN: 'Qaytarish', PRODUCT: 'Mahsulot',
-  CATEGORY: 'Kategoriya', USER: 'Foydalanuvchi',
-  INVENTORY: 'Inventar', AUTH: 'Tizim',
+const DEFAULT_CONFIG = {
+  label: 'Amal', icon: ShoppingBag, iconColor: 'text-gray-500',
+  bgColor: 'bg-gray-50', borderColor: 'border-gray-100',
 };
 
-// Filter tabs
-const FILTER_TABS = [
-  { key: 'all',       label: 'Barchasi' },
-  { key: 'sales',     label: 'Sotuvlar',    actions: ['SALE_COMPLETED', 'SALE_CREATED', 'SALE_CANCELLED', 'PRICE_OVERRIDE', 'DISCOUNT_APPLIED'] },
-  { key: 'payments',  label: "To'lovlar",   actions: ['PAYMENT_RECORDED', 'DEBT_PAYMENT', 'DEBT_CANCELLED'] },
-  { key: 'returns',   label: 'Qaytarishlar',actions: ['RETURN_CREATED', 'RETURN_APPROVED', 'RETURN_REJECTED'] },
-  { key: 'stock',     label: 'Stok',        actions: ['STOCK_DECREASED', 'STOCK_INCREASED', 'INVENTORY_ADJUSTED'] },
-  { key: 'system',    label: 'Tizim',       actions: ['LOGIN', 'LOGOUT', 'PASSWORD_CHANGED', 'CREATED', 'UPDATED', 'DELETED'] },
+const TABS = [
+  { key: 'all', label: 'Barchasi' },
+  { key: 'SALE_COMPLETED', label: 'Sotuvlar' },
+  { key: 'DEBT_PAYMENT', label: "To'lovlar" },
+  { key: 'SALE_RETURNED', label: 'Qaytarishlar' },
+  { key: 'STOCK_ADJUSTED', label: 'Stok' },
+  { key: 'USER_CREATED', label: 'Tizim' },
 ];
 
-export function AuditLogsPage() {
-  const [search, setSearch] = useState('');
-  const [activeTab, setActiveTab] = useState('all');
+function groupByDate(logs: any[]) {
+  const groups = new Map<string, any[]>();
+  for (const log of logs) {
+    const dateStr = log.createdAt.slice(0, 10);
+    if (!groups.has(dateStr)) groups.set(dateStr, []);
+    groups.get(dateStr)!.push(log);
+  }
+  return Array.from(groups.entries())
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .map(([date, items]) => {
+      const d = parseISO(date);
+      let label = format(d, 'dd MMMM yyyy', { locale: uz });
+      if (isToday(d)) label = 'Bugun';
+      else if (isYesterday(d)) label = 'Kecha';
+      return { label, date, items };
+    });
+}
 
-  const { data: logsRaw, isLoading, error } = useQuery({
-    queryKey: ['audit-logs'],
-    queryFn: () => auditApi.getAll({ limit: 500 } as any),
-    retry: 1,
-  });
+function fmtAmount(val: number | null | undefined) {
+  if (!val) return null;
+  return '$' + Number(val).toLocaleString('uz-UZ');
+}
 
-  const formatDate = (log: any) => {
-    const dateValue = log.createdAt || log.timestamp;
-    if (!dateValue) return 'N/A';
-    try {
-      const date = typeof dateValue === 'string' ? parseISO(dateValue) : new Date(dateValue);
-      if (isValid(date)) return format(date, 'dd.MM.yyyy HH:mm');
-      return 'N/A';
-    } catch { return 'N/A'; }
+// ─── Receipt Modal — sale yoki debt uchun ─────────────────────
+function ReceiptModal({ type, id, number, amount }: {
+  type: 'sale' | 'debt';
+  id: string;
+  number: string;
+  amount?: number;
+}) {
+  const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const url = type === 'sale'
+      ? `/sales/${id}/receipt`
+      : `/debts/${id}/receipt${amount ? `?amount=${amount}` : ''}`;
+
+    api
+      .get(url, { responseType: 'blob' })
+      .then((res) => {
+        const blobUrl = window.URL.createObjectURL(
+          new Blob([res.data], { type: 'application/pdf' })
+        );
+        setReceiptUrl(blobUrl);
+      })
+      .catch(() => toast.error('Chek yuklanmadi'))
+      .finally(() => setLoading(false));
+
+    return () => {
+      if (receiptUrl) window.URL.revokeObjectURL(receiptUrl);
+    };
+  }, [id, type]);
+
+  return (
+    <div className="space-y-3">
+      {loading ? (
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" />
+        </div>
+      ) : receiptUrl ? (
+        <>
+          <div className="rounded-xl overflow-hidden border border-gray-100" style={{ height: '60vh' }}>
+            <iframe src={receiptUrl} className="w-full h-full" title={`Chek #${number}`} />
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                const iframe = document.querySelector('iframe') as HTMLIFrameElement;
+                iframe?.contentWindow?.print();
+              }}
+              className="flex-1 bg-indigo-600 text-white py-2.5 rounded-xl font-semibold text-sm"
+            >Print</button>
+            <a
+              href={receiptUrl}
+              download={`chek-${number}.pdf`}
+              className="flex-1 bg-gray-100 text-gray-700 text-center py-2.5 rounded-xl font-semibold text-sm flex items-center justify-center"
+            >PDF yuklash</a>
+          </div>
+        </>
+      ) : (
+        <p className="text-center text-gray-400 py-8">Chek topilmadi</p>
+      )}
+    </div>
+  );
+}
+
+// ─── Log Row ──────────────────────────────────────────────────
+function LogRow({ log, onOpen }: {
+  log: any;
+  onOpen: (info: { type: 'sale' | 'debt'; id: string; number: string; amount?: number }) => void;
+}) {
+  const action = log.action as string;
+  const cfg = ACTION_CONFIG[action] ?? DEFAULT_CONFIG;
+  const Icon = cfg.icon;
+
+  const snap = log.afterSnapshot ?? {};
+  const meta = log.metadata ?? {};
+
+  // Mijoz/qarzdor ismi
+  const customerName =
+    snap.customerName || meta.customerName ||
+    snap.debtorName || meta.debtorName || null;
+
+  const saleNumber = snap.saleNumber || meta.saleNumber || null;
+  const grandTotal = snap.grandTotal ?? snap.amount ?? meta.amount ?? null;
+  const paymentAmount = snap.paymentAmount ?? meta.paymentAmount ?? null;
+
+  // Chek ko'rsatish mumkinmi?
+  const canViewReceipt =
+    (action === 'SALE_COMPLETED' || action === 'DEBT_PAYMENT') && log.entityId;
+
+  const handleClick = () => {
+    if (!canViewReceipt) return;
+    if (action === 'SALE_COMPLETED') {
+      onOpen({
+        type: 'sale',
+        id: log.entityId,
+        number: saleNumber ?? log.entityId.slice(0, 8),
+      });
+    } else if (action === 'DEBT_PAYMENT') {
+      onOpen({
+        type: 'debt',
+        id: log.entityId,
+        number: log.entityId.slice(0, 8),
+        amount: paymentAmount ?? undefined,
+      });
+    }
   };
 
-  const getUserName = (log: any) => {
-    if (log.user?.fullName) return log.user.fullName;
-    if (log.user?.username) return log.user.username;
-    if (log.userName) return log.userName;
-    return 'Tizim';
-  };
+  return (
+    <div
+      className={`flex items-center gap-3 px-4 py-3 bg-white rounded-xl border ${cfg.borderColor} transition-all ${
+        canViewReceipt ? 'cursor-pointer hover:shadow-md hover:border-indigo-200' : 'hover:shadow-sm'
+      }`}
+      onClick={handleClick}
+    >
+      {/* Icon */}
+      <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${cfg.bgColor}`}>
+        <Icon size={16} className={cfg.iconColor} />
+      </div>
 
-  const getDetails = (log: any) => {
-    const meta = log.metadata || {};
-    const after = log.afterSnapshot || {};
-    const before = log.beforeSnapshot || {};
+      {/* Info */}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="font-semibold text-gray-900 text-sm">{cfg.label}</span>
+          {saleNumber && <span className="text-xs text-gray-400">#{saleNumber}</span>}
 
-    // Sotuv
-    if (['SALE_COMPLETED', 'SALE_CREATED'].includes(log.action)) {
-      const total = meta.totalAmount || after.totalAmount || meta.grandTotal;
-      const items = meta.itemCount || after.itemCount;
-      const customer = meta.customerName || meta.debtorName;
-      const saleNum = meta.saleNumber || after.saleNumber;
-      return (
-        <div className="flex flex-wrap gap-2 text-xs">
-          {saleNum && <span className="font-mono bg-white border border-gray-200 px-1.5 py-0.5 rounded">#{saleNum}</span>}
-          {total !== undefined && <span className="font-semibold text-emerald-700">{formatCurrency(total)}</span>}
-          {items && <span className="text-gray-500">{items} ta mahsulot</span>}
-          {customer && <span className="text-blue-600">👤 {customer}</span>}
-        </div>
-      );
-    }
-
-    // To'lov
-    if (['PAYMENT_RECORDED', 'DEBT_PAYMENT'].includes(log.action)) {
-      const amount = meta.amount || after.amount;
-      const method = meta.method || after.method;
-      const methodLabel: Record<string, string> = { CASH: 'Naqd', CARD: 'Karta', DEBT: 'Qarz' };
-      return (
-        <div className="flex gap-2 text-xs">
-          {amount && <span className="font-semibold text-emerald-700">{formatCurrency(amount)}</span>}
-          {method && <span className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">{methodLabel[method] || method}</span>}
-        </div>
-      );
-    }
-
-    // Narx o'zgarishi
-    if (log.action === 'PRICE_OVERRIDE') {
-      const oldPrice = before.salePrice || meta.oldPrice;
-      const newPrice = after.salePrice || meta.newPrice;
-      return (
-        <div className="flex gap-2 text-xs items-center">
-          {oldPrice && <span className="line-through text-gray-400">{formatCurrency(oldPrice)}</span>}
-          {newPrice && <span className="font-semibold text-orange-700">→ {formatCurrency(newPrice)}</span>}
-        </div>
-      );
-    }
-
-    // Stok
-    if (['STOCK_DECREASED', 'STOCK_INCREASED', 'INVENTORY_ADJUSTED'].includes(log.action)) {
-      const qty = meta.quantity || meta.qty || meta.amount;
-      const productName = meta.productName || after.name;
-      return (
-        <div className="flex gap-2 text-xs">
-          {productName && <span className="text-gray-700">{productName}</span>}
-          {qty !== undefined && (
-            <span className={log.action === 'STOCK_DECREASED' ? 'text-red-600 font-semibold' : 'text-emerald-600 font-semibold'}>
-              {log.action === 'STOCK_DECREASED' ? '-' : '+'}{qty}
+          {customerName ? (
+            <span className="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-md font-medium flex items-center gap-1">
+              <User size={10} />{customerName}
             </span>
+          ) : action === 'SALE_COMPLETED' ? (
+            <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-md font-medium">
+              Naqd
+            </span>
+          ) : null}
+        </div>
+
+        <div className="flex items-center gap-2 mt-0.5">
+          <p className="text-xs text-gray-400">
+            {log.user?.fullName || log.user?.username || "Noma'lum"}
+          </p>
+          <span className="text-gray-200">·</span>
+          <p className="text-xs text-gray-400">
+            {format(parseISO(log.createdAt), 'HH:mm')}
+          </p>
+          {canViewReceipt && (
+            <>
+              <span className="text-gray-200">·</span>
+              <span className="text-xs text-indigo-400 flex items-center gap-0.5">
+                <FileText size={11} /> Chek
+              </span>
+            </>
           )}
         </div>
-      );
-    }
+      </div>
 
-    // Qaytarish
-    if (log.action.startsWith('RETURN')) {
-      const amount = meta.totalAmount || after.totalAmount;
-      const reason = meta.reason || after.reason;
-      return (
-        <div className="flex gap-2 text-xs">
-          {amount && <span className="font-semibold text-orange-700">{formatCurrency(amount)}</span>}
-          {reason && <span className="text-gray-500">{reason}</span>}
-        </div>
-      );
-    }
-
-    // Default: metadata yoki description
-    const desc = log.description || meta.description || meta.name || after.name || '';
-    return desc ? <span className="text-xs text-gray-500">{String(desc)}</span> : null;
-  };
-
-  if (isLoading) return <div className="flex items-center justify-center h-96"><LoadingSpinner /></div>;
-
-  if (error) return (
-    <div className="flex items-center justify-center h-96">
-      <div className="text-center">
-        <ShieldAlert size={48} className="mx-auto mb-4 text-red-400" />
-        <p className="text-red-600">Xatolik: {String((error as any)?.message || 'Yuklashda muammo')}</p>
+      {/* Summa */}
+      <div className="text-right flex-shrink-0">
+        {action === 'DEBT_PAYMENT' && paymentAmount ? (
+          <p className="font-bold text-sm text-amber-600">{fmtAmount(paymentAmount)}</p>
+        ) : grandTotal ? (
+          <p className="font-bold text-sm text-gray-900">{fmtAmount(grandTotal)}</p>
+        ) : null}
       </div>
     </div>
   );
+}
 
-  const allLogs = Array.isArray(logsRaw) ? logsRaw : [];
+// ─── Main Page ────────────────────────────────────────────────
+export function AuditLogsPage() {
+  const [search, setSearch] = useState('');
+  const [activeTab, setActiveTab] = useState('all');
+  const [page, setPage] = useState(1);
+  const [receipt, setReceipt] = useState<{
+    type: 'sale' | 'debt'; id: string; number: string; amount?: number;
+  } | null>(null);
 
-  // Filter by tab
-  const tabConfig = FILTER_TABS.find(t => t.key === activeTab);
-  let filtered = allLogs.filter((log: any) => IMPORTANT_ACTIONS.includes(log.action));
-  if (tabConfig?.actions) filtered = filtered.filter((log: any) => tabConfig.actions!.includes(log.action));
-
-  // Filter by search
-  if (search) {
-    const q = search.toLowerCase();
-    filtered = filtered.filter((log: any) =>
-      getUserName(log).toLowerCase().includes(q) ||
-      log.action?.toLowerCase().includes(q) ||
-      log.entity?.toLowerCase().includes(q) ||
-      JSON.stringify(log.metadata || {}).toLowerCase().includes(q)
-    );
-  }
-
-  // Group by date
-  const grouped: Record<string, any[]> = {};
-  filtered.forEach((log: any) => {
-    const dateValue = log.createdAt || log.timestamp;
-    let dateKey = 'Noma\'lum sana';
-    try {
-      const d = typeof dateValue === 'string' ? parseISO(dateValue) : new Date(dateValue);
-      if (isValid(d)) dateKey = format(d, 'dd MMMM yyyy');
-    } catch {}
-    if (!grouped[dateKey]) grouped[dateKey] = [];
-    grouped[dateKey].push(log);
+  const { data, isLoading } = useQuery({
+    queryKey: ['audit-logs', page, search, activeTab],
+    queryFn: () => auditApi.getAll({
+      page,
+      limit: 50,
+      search: search || undefined,
+      action: activeTab !== 'all' ? activeTab : undefined,
+    }),
   });
 
+  const logs: any[] = data?.data ?? [];
+  const total: number = data?.total ?? 0;
+
+  const filtered = activeTab === 'all'
+    ? logs.filter(l => Object.keys(ACTION_CONFIG).includes(l.action))
+    : logs;
+
+  const grouped = groupByDate(filtered);
+
   return (
-    <div className="space-y-5">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Sotuv Jurnali</h1>
-          <p className="text-gray-500 text-sm">{filtered.length} ta yozuv</p>
-        </div>
-        <div className="w-full sm:w-72">
-          <Input
-            placeholder="Qidirish..."
-            icon={<Search size={16} />}
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
+    <div className="space-y-4">
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Sotuv Jurnali</h1>
+        <p className="text-gray-500 text-sm">{total} ta yozuv</p>
       </div>
 
-      {/* Tabs */}
+      <Input
+        placeholder="Qidirish..."
+        icon={<Search size={16} />}
+        value={search}
+        onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+      />
+
       <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar">
-        {FILTER_TABS.map(tab => (
+        {TABS.map(({ key, label }) => (
           <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
+            key={key}
+            onClick={() => { setActiveTab(key); setPage(1); }}
             className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
-              activeTab === tab.key
-                ? 'bg-indigo-600 text-white shadow-sm'
-                : 'bg-white border border-gray-200 text-gray-600 hover:border-indigo-300 hover:text-indigo-600'
+              activeTab === key
+                ? 'bg-indigo-600 text-white'
+                : 'bg-white border border-gray-200 text-gray-600 hover:border-indigo-300'
             }`}
           >
-            {tab.label}
+            {label}
           </button>
         ))}
       </div>
 
-      {/* Logs grouped by date */}
-      {Object.keys(grouped).length === 0 ? (
-        <Card>
-          <div className="flex flex-col items-center justify-center py-16 text-gray-400">
-            <ShieldAlert size={48} className="mb-3 opacity-20" />
-            <p>Yozuvlar topilmadi</p>
-          </div>
-        </Card>
+      {isLoading ? (
+        <div className="flex items-center justify-center h-40">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" />
+        </div>
+      ) : grouped.length === 0 ? (
+        <div className="text-center py-12 text-gray-400">
+          <ShoppingBag size={40} className="mx-auto mb-2 opacity-20" />
+          <p className="text-sm">Yozuvlar topilmadi</p>
+        </div>
       ) : (
-        Object.entries(grouped).map(([dateKey, logs]) => (
-          <div key={dateKey} className="space-y-2">
-            {/* Date header */}
-            <div className="flex items-center gap-3">
-              <span className="text-xs font-bold text-gray-500 uppercase tracking-wide whitespace-nowrap">{dateKey}</span>
-              <div className="flex-1 h-px bg-gray-200" />
-              <span className="text-xs text-gray-400">{logs.length} ta</span>
+        <div className="space-y-5">
+          {grouped.map((group) => (
+            <div key={group.date}>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                  {group.label}
+                </span>
+                <div className="flex-1 h-px bg-gray-100" />
+                <span className="text-xs text-gray-400">{group.items.length} ta</span>
+              </div>
+              <div className="space-y-1.5">
+                {group.items.map((log: any) => (
+                  <LogRow key={log.id} log={log} onOpen={setReceipt} />
+                ))}
+              </div>
             </div>
+          ))}
 
-            {/* Log cards */}
-            <div className="space-y-1.5">
-              {logs.map((log: any) => {
-                const cfg = ACTION_CONFIG[log.action] || {
-                  label: log.action, color: 'text-gray-700',
-                  bg: 'bg-gray-50 border-gray-200', icon: Settings
-                };
-                const Icon = cfg.icon;
-                const details = getDetails(log);
-                const entityLabel = ENTITY_LABELS[log.entity] || log.entity;
-
-                return (
-                  <div
-                    key={log.id}
-                    className={`flex items-start gap-3 px-3 py-2.5 rounded-xl border ${cfg.bg} transition-all`}
-                  >
-                    {/* Icon */}
-                    <div className={`mt-0.5 flex-shrink-0 ${cfg.color}`}>
-                      <Icon size={16} />
-                    </div>
-
-                    {/* Content */}
-                    <div className="flex-1 min-w-0 space-y-0.5">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className={`text-xs font-bold ${cfg.color}`}>{cfg.label}</span>
-                        <span className="text-xs text-gray-400">·</span>
-                        <span className="text-xs text-gray-500">{entityLabel}</span>
-                        {details && (
-                          <>
-                            <span className="text-xs text-gray-400">·</span>
-                            {details}
-                          </>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 text-xs text-gray-400">
-                        <User size={11} />
-                        <span>{getUserName(log)}</span>
-                        <span>·</span>
-                        <span>{formatDate(log)}</span>
-                        {log.ipAddress && (
-                          <>
-                            <span>·</span>
-                            <span className="font-mono">{log.ipAddress}</span>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+          {total > 50 && (
+            <div className="flex items-center justify-between pt-2">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page === 1}
+                className="px-4 py-2 text-sm border border-gray-200 rounded-xl disabled:opacity-40 hover:border-indigo-300 transition-colors"
+              >Oldingi</button>
+              <span className="text-sm text-gray-500">
+                {page} / {Math.ceil(total / 50)}
+              </span>
+              <button
+                onClick={() => setPage((p) => p + 1)}
+                disabled={page >= Math.ceil(total / 50)}
+                className="px-4 py-2 text-sm border border-gray-200 rounded-xl disabled:opacity-40 hover:border-indigo-300 transition-colors"
+              >Keyingi</button>
             </div>
-          </div>
-        ))
+          )}
+        </div>
       )}
+
+      {/* Receipt Modal — sale va debt uchun ikkala turdagi chek */}
+      <Modal
+        isOpen={!!receipt}
+        onClose={() => setReceipt(null)}
+        title={receipt?.type === 'debt' ? "Qarz to'lov cheki" : `Sotuv cheki #${receipt?.number ?? ''}`}
+        size="md"
+      >
+        {receipt && (
+          <ReceiptModal
+            type={receipt.type}
+            id={receipt.id}
+            number={receipt.number}
+            amount={receipt.amount}
+          />
+        )}
+      </Modal>
     </div>
   );
 }

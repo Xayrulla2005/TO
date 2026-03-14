@@ -88,7 +88,6 @@ export interface CategoryPerformance {
   totalSales: number;
 }
 
-// ✅ Kam qoldiq chegarasi — bir joyda o'zgartirish uchun
 const LOW_STOCK_THRESHOLD = 5;
 
 @Injectable()
@@ -111,7 +110,6 @@ export class StatisticsService {
     private readonly returnRepository: Repository<ReturnEntity>,
   ) {}
 
-  // ─── Date Range Helpers ─────────────────────────────────
   private getDateRange(
     period: StatisticsPeriod,
     referenceDate?: Date,
@@ -130,12 +128,31 @@ export class StatisticsService {
 
     switch (period) {
       case StatisticsPeriod.DAILY: {
-        const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
-        const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+        const start = new Date(
+          now.getFullYear(),
+          now.getMonth(),
+          now.getDate(),
+          0,
+          0,
+          0,
+        );
+        const end = new Date(
+          now.getFullYear(),
+          now.getMonth(),
+          now.getDate(),
+          23,
+          59,
+          59,
+          999,
+        );
         return {
           startDate: start,
           endDate: end,
-          label: start.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }),
+          label: start.toLocaleDateString("en-US", {
+            year: "numeric",
+            month: "long",
+            day: "numeric",
+          }),
         };
       }
       case StatisticsPeriod.WEEKLY: {
@@ -154,24 +171,38 @@ export class StatisticsService {
       }
       case StatisticsPeriod.MONTHLY: {
         const start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0);
-        const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+        const end = new Date(
+          now.getFullYear(),
+          now.getMonth() + 1,
+          0,
+          23,
+          59,
+          59,
+          999,
+        );
         return {
           startDate: start,
           endDate: end,
-          label: start.toLocaleDateString("en-US", { year: "numeric", month: "long" }),
+          label: start.toLocaleDateString("en-US", {
+            year: "numeric",
+            month: "long",
+          }),
         };
       }
       case StatisticsPeriod.YEARLY: {
         const start = new Date(now.getFullYear(), 0, 1, 0, 0, 0);
         const end = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
-        return { startDate: start, endDate: end, label: String(now.getFullYear()) };
+        return {
+          startDate: start,
+          endDate: end,
+          label: String(now.getFullYear()),
+        };
       }
       default:
         return this.getDateRange(StatisticsPeriod.DAILY, now);
     }
   }
 
-  // ─── Core Statistics Query ───────────────────────────────
   async getStatistics(
     period: StatisticsPeriod,
     referenceDate?: string,
@@ -181,7 +212,12 @@ export class StatisticsService {
     const ref = referenceDate ? new Date(referenceDate) : undefined;
     const cStart = customStart ? new Date(customStart) : undefined;
     const cEnd = customEnd ? new Date(customEnd) : undefined;
-    const { startDate, endDate, label } = this.getDateRange(period, ref, cStart, cEnd);
+    const { startDate, endDate, label } = this.getDateRange(
+      period,
+      ref,
+      cStart,
+      cEnd,
+    );
 
     const result = await this.saleRepository
       .createQueryBuilder("sale")
@@ -191,7 +227,10 @@ export class StatisticsService {
       .addSelect('COALESCE(SUM(sale."grossProfit"), 0)', "grossProfit")
       .addSelect('COALESCE(SUM(sale."netProfit"), 0)', "netProfit")
       .where("sale.status = :status", { status: SaleStatus.COMPLETED })
-      .andWhere("sale.completed_at BETWEEN :start AND :end", { start: startDate, end: endDate })
+      .andWhere("sale.completed_at BETWEEN :start AND :end", {
+        start: startDate,
+        end: endDate,
+      })
       .getRawOne();
 
     const quantityResult = await this.saleRepository
@@ -200,7 +239,10 @@ export class StatisticsService {
       .select("COALESCE(SUM(item.quantity), 0)", "totalQuantity")
       .addSelect("COUNT(DISTINCT item.id)", "totalItems")
       .where("sale.status = :status", { status: SaleStatus.COMPLETED })
-      .andWhere("sale.completed_at BETWEEN :start AND :end", { start: startDate, end: endDate })
+      .andWhere("sale.completed_at BETWEEN :start AND :end", {
+        start: startDate,
+        end: endDate,
+      })
       .getRawOne();
 
     const paymentsResult = await this.paymentRepository
@@ -209,7 +251,10 @@ export class StatisticsService {
       .select("payment.method", "method")
       .addSelect("COALESCE(SUM(payment.amount), 0)", "amount")
       .where("sale.status = :status", { status: SaleStatus.COMPLETED })
-      .andWhere("sale.completed_at BETWEEN :start AND :end", { start: startDate, end: endDate })
+      .andWhere("sale.completed_at BETWEEN :start AND :end", {
+        start: startDate,
+        end: endDate,
+      })
       .groupBy("payment.method")
       .getRawMany();
 
@@ -236,7 +281,8 @@ export class StatisticsService {
       startDate: startDate.toISOString(),
       endDate: endDate.toISOString(),
       totalRevenue: Math.round(totalRevenue * 100) / 100,
-      totalQuantitySold: Math.round(parseFloat(quantityResult.totalQuantity) * 100) / 100,
+      totalQuantitySold:
+        Math.round(parseFloat(quantityResult.totalQuantity) * 100) / 100,
       cashAmount: Math.round(cashAmount * 100) / 100,
       cardAmount: Math.round(cardAmount * 100) / 100,
       debtAmount: Math.round(debtAmount * 100) / 100,
@@ -250,7 +296,6 @@ export class StatisticsService {
     };
   }
 
-  // ─── Dashboard Summary ───────────────────────────────────
   async getDashboardSummary(): Promise<DashboardSummary> {
     const [today, thisWeek, thisMonth] = await Promise.all([
       this.getStatistics(StatisticsPeriod.DAILY),
@@ -258,24 +303,32 @@ export class StatisticsService {
       this.getStatistics(StatisticsPeriod.MONTHLY),
     ]);
 
-    const [totalProducts, totalCategories, lowStockCount, pendingDebtsCount, pendingReturnsCount] =
-      await Promise.all([
-        this.productRepository.count(),
-        this.categoryRepository.count(),
-        // ✅ FIX: LOW_STOCK_THRESHOLD ishlatildi
-        this.productRepository
-          .createQueryBuilder("product")
-          .where("product.stock_quantity <= :threshold", { threshold: LOW_STOCK_THRESHOLD })
-          .andWhere("product.deleted_at IS NULL")
-          .getCount(),
-        this.debtRepository.count({ where: { status: DebtStatus.PENDING } }),
-        this.returnRepository.count({ where: { status: ReturnStatus.PENDING } }),
-      ]);
+    const [
+      totalProducts,
+      totalCategories,
+      lowStockCount,
+      pendingDebtsCount,
+      pendingReturnsCount,
+    ] = await Promise.all([
+      this.productRepository.count(),
+      this.categoryRepository.count(),
+      this.productRepository
+        .createQueryBuilder("product")
+        .where("product.stock_quantity <= :threshold", {
+          threshold: LOW_STOCK_THRESHOLD,
+        })
+        .andWhere("product.deleted_at IS NULL")
+        .getCount(),
+      this.debtRepository.count({ where: { status: DebtStatus.PENDING } }),
+      this.returnRepository.count({ where: { status: ReturnStatus.PENDING } }),
+    ]);
 
     const debtSum = await this.debtRepository
       .createQueryBuilder("debt")
       .select("COALESCE(SUM(debt.remaining_amount), 0)", "total")
-      .where("debt.status IN (:...statuses)", { statuses: [DebtStatus.PENDING, DebtStatus.PARTIALLY_PAID] })
+      .where("debt.status IN (:...statuses)", {
+        statuses: [DebtStatus.PENDING, DebtStatus.PARTIALLY_PAID],
+      })
       .getRawOne();
 
     const recentSales = await this.saleRepository.find({
@@ -342,19 +395,24 @@ export class StatisticsService {
     };
   }
 
-  // ─── Monthly Breakdown ───────────────────────────────────
   async getMonthlyBreakdown(year: number): Promise<StatisticsResult[]> {
     const results: StatisticsResult[] = [];
     for (let month = 0; month < 12; month++) {
       const refDate = new Date(year, month, 15);
-      const stats = await this.getStatistics(StatisticsPeriod.MONTHLY, refDate.toISOString());
+      const stats = await this.getStatistics(
+        StatisticsPeriod.MONTHLY,
+        refDate.toISOString(),
+      );
       results.push(stats);
     }
     return results;
   }
 
-  // ─── Product Performance ─────────────────────────────────
-  async getProductPerformance(startDate: Date, endDate: Date, limit = 20): Promise<ProductPerformance[]> {
+  async getProductPerformance(
+    startDate: Date,
+    endDate: Date,
+    limit = 20,
+  ): Promise<ProductPerformance[]> {
     const results = await this.saleRepository
       .createQueryBuilder("sale")
       .leftJoin("sale.items", "item")
@@ -364,11 +422,17 @@ export class StatisticsService {
       .addSelect("item.category_snapshot", "categoryName")
       .addSelect("SUM(item.quantity)", "totalQuantitySold")
       .addSelect("SUM(item.custom_total)", "totalRevenue")
-      .addSelect("SUM((item.custom_unit_price - item.purchase_price_snapshot) * item.quantity)", "totalProfit")
+      .addSelect(
+        "SUM((item.custom_unit_price - item.purchase_price_snapshot) * item.quantity)",
+        "totalProfit",
+      )
       .addSelect("AVG(item.custom_unit_price)", "averagePrice")
       .addSelect("COUNT(DISTINCT sale.id)", "salesCount")
       .where("sale.status = :status", { status: SaleStatus.COMPLETED })
-      .andWhere("sale.completed_at BETWEEN :start AND :end", { start: startDate, end: endDate })
+      .andWhere("sale.completed_at BETWEEN :start AND :end", {
+        start: startDate,
+        end: endDate,
+      })
       .groupBy("product.id, item.product_name_snapshot, item.category_snapshot")
       .orderBy("SUM(item.custom_total)", "DESC")
       .limit(limit)
@@ -386,18 +450,26 @@ export class StatisticsService {
     }));
   }
 
-  // ─── Category Performance ────────────────────────────────
-  async getCategoryPerformance(startDate: Date, endDate: Date): Promise<CategoryPerformance[]> {
+  async getCategoryPerformance(
+    startDate: Date,
+    endDate: Date,
+  ): Promise<CategoryPerformance[]> {
     const results = await this.saleRepository
       .createQueryBuilder("sale")
       .leftJoin("sale.items", "item")
       .select("item.category_snapshot", "categoryName")
       .addSelect("SUM(item.custom_total)", "totalRevenue")
-      .addSelect("SUM((item.custom_unit_price - item.purchase_price_snapshot) * item.quantity)", "totalProfit")
+      .addSelect(
+        "SUM((item.custom_unit_price - item.purchase_price_snapshot) * item.quantity)",
+        "totalProfit",
+      )
       .addSelect("COUNT(DISTINCT item.product_id)", "productCount")
       .addSelect("COUNT(DISTINCT sale.id)", "totalSales")
       .where("sale.status = :status", { status: SaleStatus.COMPLETED })
-      .andWhere("sale.completed_at BETWEEN :start AND :end", { start: startDate, end: endDate })
+      .andWhere("sale.completed_at BETWEEN :start AND :end", {
+        start: startDate,
+        end: endDate,
+      })
       .groupBy("item.category_snapshot")
       .orderBy("SUM(item.custom_total)", "DESC")
       .getRawMany();
@@ -412,8 +484,9 @@ export class StatisticsService {
     }));
   }
 
-  // ─── Sales Trend ─────────────────────────────────────────
-  async getSalesTrend(days = 30): Promise<Array<{ date: string; sales: number; revenue: number }>> {
+  async getSalesTrend(
+    days = 30,
+  ): Promise<Array<{ date: string; sales: number; revenue: number }>> {
     const endDate = new Date();
     const startDate = new Date();
     startDate.setDate(endDate.getDate() - days);
@@ -424,7 +497,10 @@ export class StatisticsService {
       .addSelect("COUNT(*)", "sales")
       .addSelect('COALESCE(SUM("sale"."grandTotal"), 0)', "revenue")
       .where("sale.status = :status", { status: SaleStatus.COMPLETED })
-      .andWhere("sale.completed_at BETWEEN :start AND :end", { start: startDate, end: endDate })
+      .andWhere("sale.completed_at BETWEEN :start AND :end", {
+        start: startDate,
+        end: endDate,
+      })
       .groupBy('DATE("sale"."completed_at")')
       .orderBy("date", "ASC")
       .getRawMany();
@@ -436,7 +512,7 @@ export class StatisticsService {
     }));
   }
 
-  // ─── Helper: Recent Sales ────────────────────────────────
+  // ─── Helper: Recent Sales ── ✅ FIX: customer + debt relations qo'shildi ──
   async getRecentSales(date: Date, limit = 20) {
     const startOfDay = new Date(date);
     startOfDay.setHours(0, 0, 0, 0);
@@ -444,46 +520,61 @@ export class StatisticsService {
     endOfDay.setHours(23, 59, 59, 999);
 
     const sales = await this.saleRepository.find({
-      where: { status: SaleStatus.COMPLETED, completedAt: Between(startOfDay, endOfDay) },
+      where: {
+        status: SaleStatus.COMPLETED,
+        completedAt: Between(startOfDay, endOfDay),
+      },
+      relations: ["customer", "debt"], // ✅ mijoz va qarz ma'lumotlari yuklandi
       order: { completedAt: "DESC" },
       take: limit,
     });
 
     return Promise.all(
       sales.map(async (sale) => {
-        const payments = await this.paymentRepository.find({ where: { saleId: sale.id } });
+        const payments = await this.paymentRepository.find({
+          where: { saleId: sale.id },
+        });
         let paymentMethod = "CASH";
         if (payments.length > 1) paymentMethod = "MIXED";
         else if (payments.length === 1) paymentMethod = payments[0].method;
-        return { ...sale, customerName: null, paymentMethod };
+
+        // ✅ Mijoz ismi: customer.name → debt.debtorName → null (naqd)
+        const customerName =
+          (sale as any).customer?.name ||
+          (sale as any).debt?.debtorName ||
+          null;
+
+        return { ...sale, customerName, paymentMethod };
       }),
     );
   }
 
-  // ─── Helper: Low Stock ───────────────────────────────────
-  // ✅ FIX: min_stock_limit o'rniga LOW_STOCK_THRESHOLD = 5 ishlatildi
-  async getLowStockProducts(limit = 10) {
+   async getLowStockProducts(limit = 10) {
     return this.productRepository
       .createQueryBuilder("product")
-      .where("product.stock_quantity <= :threshold", { threshold: LOW_STOCK_THRESHOLD })
+      .where("product.stock_quantity <= product.min_stock_limit")
       .andWhere("product.deleted_at IS NULL")
       .orderBy("product.stock_quantity", "ASC")
       .limit(limit)
       .getMany();
   }
 
-  // ─── Helper: Best Selling ────────────────────────────────
   async getBestSellingProducts(startDate: Date, endDate: Date, limit = 10) {
     const results = await this.saleRepository
       .createQueryBuilder("sale")
       .leftJoin("sale.items", "item")
+      .leftJoin("item.product", "product")
       .select("item.product_id", "productId")
       .addSelect("item.product_name_snapshot", "productName")
+      .addSelect("product.unit", "unit")
       .addSelect("SUM(item.quantity)", "totalQuantitySold")
       .addSelect("SUM(item.custom_total)", "totalRevenue")
       .where("sale.status = :status", { status: SaleStatus.COMPLETED })
-      .andWhere("sale.completed_at BETWEEN :start AND :end", { start: startDate, end: endDate })
-      .groupBy("item.product_id, item.product_name_snapshot")
+      .andWhere("sale.completed_at BETWEEN :start AND :end", {
+        start: startDate,
+        end: endDate,
+      })
+      .groupBy("item.product_id, item.product_name_snapshot, product.unit")
       .orderBy("SUM(item.quantity)", "DESC")
       .limit(limit)
       .getRawMany();
@@ -491,12 +582,12 @@ export class StatisticsService {
     return results.map((r) => ({
       productId: r.productId,
       productName: r.productName || "Unknown",
+      unit: r.unit || "piece",
       totalQuantitySold: parseFloat(r.totalQuantitySold) || 0,
       totalRevenue: parseFloat(r.totalRevenue) || 0,
     }));
   }
 
-  // ─── Statistics Summary ──────────────────────────────────
   async getSummaryByRange(range: "daily" | "weekly" | "monthly" | "yearly") {
     const periodMap = {
       daily: StatisticsPeriod.DAILY,
@@ -512,18 +603,31 @@ export class StatisticsService {
 
     if (range === "daily") {
       const trend = await this.getSalesTrend(1);
-      chartData = trend.map((t) => ({ label: new Date(t.date).getHours() + ":00", value: Number(t.revenue) || 0 }));
+      chartData = trend.map((t) => ({
+        label: new Date(t.date).getHours() + ":00",
+        value: Number(t.revenue) || 0,
+      }));
     } else if (range === "weekly") {
       const trend = await this.getSalesTrend(7);
-      chartData = trend.map((t) => ({ label: new Date(t.date).toLocaleDateString("en-US", { weekday: "short" }), value: Number(t.revenue) || 0 }));
+      chartData = trend.map((t) => ({
+        label: new Date(t.date).toLocaleDateString("en-US", {
+          weekday: "short",
+        }),
+        value: Number(t.revenue) || 0,
+      }));
     } else if (range === "monthly") {
       const trend = await this.getSalesTrend(30);
-      chartData = trend.map((t) => ({ label: new Date(t.date).getDate().toString(), value: Number(t.revenue) || 0 }));
+      chartData = trend.map((t) => ({
+        label: new Date(t.date).getDate().toString(),
+        value: Number(t.revenue) || 0,
+      }));
     } else if (range === "yearly") {
       const now = new Date();
       const breakdown = await this.getMonthlyBreakdown(now.getFullYear());
       chartData = breakdown.map((m, i) => ({
-        label: new Date(now.getFullYear(), i, 1).toLocaleDateString("en-US", { month: "short" }),
+        label: new Date(now.getFullYear(), i, 1).toLocaleDateString("en-US", {
+          month: "short",
+        }),
         value: Number(m.totalRevenue) || 0,
       }));
     }
@@ -541,11 +645,13 @@ export class StatisticsService {
     };
   }
 
-  // ─── Dashboard By Date ───────────────────────────────────
   async getDashboardByDate(date?: string) {
     const targetDate = date ? new Date(date) : new Date();
 
-    const todayStats = await this.getStatistics(StatisticsPeriod.DAILY, targetDate.toISOString());
+    const todayStats = await this.getStatistics(
+      StatisticsPeriod.DAILY,
+      targetDate.toISOString(),
+    );
     const recentSales = await this.getRecentSales(targetDate, 20);
     const lowStock = await this.getLowStockProducts(10);
 
@@ -554,7 +660,11 @@ export class StatisticsService {
     const endOfDay = new Date(targetDate);
     endOfDay.setHours(23, 59, 59, 999);
 
-    const bestSelling = await this.getBestSellingProducts(startOfDay, endOfDay, 10);
+    const bestSelling = await this.getBestSellingProducts(
+      startOfDay,
+      endOfDay,
+      10,
+    );
 
     return {
       todayRevenue: Number(todayStats.totalRevenue) || 0,
