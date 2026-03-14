@@ -32,7 +32,7 @@ export function LoginPage() {
       login(
         {
           id: user.id,
-          fullName: user.fullName || user.username,
+          fullName: user.fullName ?? (user as any).username,
           phone: user.phone || '',
           role: user.role,
           isActive: user.isActive,
