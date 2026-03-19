@@ -100,7 +100,7 @@ export class ReceiptService {
     hline(y, 0.5, '#e2e8f0');
     y += 8;
 
-    // ── Mijoz ma'lumotlari (customer relation yoki debt) ──
+    // ── Mijoz ma'lumotlari ──
     const debtPayment = sale.payments?.find(p => p.method === 'DEBT');
     const customerName = (sale as any).customer?.name || sale.debt?.debtorName;
     const customerPhone = (sale as any).customer?.phone || sale.debt?.debtorPhone;
@@ -136,44 +136,128 @@ export class ReceiptService {
     }
 
     // ── TABLE ──
-    const col = {
-      no:    { x: L,           w: 25  },
-      name:  { x: L + 25,      w: 225 },
-      qty:   { x: L + 250,     w: 65  },
-      price: { x: L + 315,     w: 100 },
-      total: { x: L + 415,     w: 100 },
-    };
+    // Chegirma ustuni borligini tekshirish
+    const hasAnyDiscount = sale.items.some(item => {
+      const originalPrice = Number(item.baseUnitPrice);
+      const customPrice = Number(item.customUnitPrice);
+      return originalPrice > 0 && customPrice < originalPrice;
+    });
 
+    const col = hasAnyDiscount
+      ? {
+          no:       { x: L,           w: 22  },
+          name:     { x: L + 22,      w: 185 },
+          qty:      { x: L + 207,     w: 50  },
+          origPrice:{ x: L + 257,     w: 70  },
+          discount: { x: L + 327,     w: 55  },
+          price:    { x: L + 382,     w: 70  },
+          total:    { x: L + 452,     w: 63  },
+        }
+      : {
+          no:       { x: L,           w: 25  },
+          name:     { x: L + 25,      w: 225 },
+          qty:      { x: L + 250,     w: 65  },
+          origPrice:{ x: L + 315,     w: 0   },  // yo'q
+          discount: { x: L + 315,     w: 0   },  // yo'q
+          price:    { x: L + 315,     w: 100 },
+          total:    { x: L + 415,     w: 100 },
+        };
+
+    // Jadval sarlavhasi
     doc.save().rect(L, y, PW, 22).fillColor('#1e293b').fill().restore();
+    cell('Nr',           col.no.x,    y, col.no.w,    { bold: true, color: '#ffffff', align: 'center' });
+    cell('Mahsulot',     col.name.x,  y, col.name.w,  { bold: true, color: '#ffffff' });
+    cell('Miqdor',       col.qty.x,   y, col.qty.w,   { bold: true, color: '#ffffff', align: 'center' });
 
-    cell('Nr',            col.no.x,    y, col.no.w,    { bold: true, color: '#ffffff', align: 'center' });
-    cell('Mahsulot nomi', col.name.x,  y, col.name.w,  { bold: true, color: '#ffffff' });
-    cell('Miqdor',        col.qty.x,   y, col.qty.w,   { bold: true, color: '#ffffff', align: 'center' });
-    cell('Narxi',         col.price.x, y, col.price.w, { bold: true, color: '#ffffff', align: 'right' });
-    cell('Jami',          col.total.x, y, col.total.w, { bold: true, color: '#ffffff', align: 'right' });
+    if (hasAnyDiscount) {
+      cell('Asl narx',   col.origPrice.x, y, col.origPrice.w, { bold: true, color: '#94a3b8', align: 'right', size: 8 });
+      cell('Chegirma',   col.discount.x,  y, col.discount.w,  { bold: true, color: '#fbbf24', align: 'center', size: 8 });
+    }
 
+    cell('Narxi',        col.price.x, y, col.price.w, { bold: true, color: '#ffffff', align: 'right' });
+    cell('Jami',         col.total.x, y, col.total.w, { bold: true, color: '#ffffff', align: 'right' });
     y += 22;
 
-    const vlines = [col.no.x + col.no.w, col.qty.x, col.price.x, col.total.x];
+    // Vertikal chiziq uchun x nuqtalar
+    const vlines = hasAnyDiscount
+      ? [col.no.x + col.no.w, col.qty.x, col.origPrice.x, col.discount.x, col.price.x, col.total.x]
+      : [col.no.x + col.no.w, col.qty.x, col.price.x, col.total.x];
+
+    // Asl narxlar jami (chegirma foizini hisoblash uchun)
+    let originalSubtotal = 0;
 
     sale.items.forEach((item, idx) => {
       const isEven = idx % 2 === 0;
       const rowBg = isEven ? '#f8fafc' : '#ffffff';
-      const nameLines = Math.ceil(item.productNameSnapshot.length / 28);
+      const nameLines = Math.ceil(item.productNameSnapshot.length / (hasAnyDiscount ? 22 : 28));
       const rowH = Math.max(20, nameLines * 12 + 8);
 
       fillRect(L, y, PW, rowH, rowBg);
 
-      const total = Number(item.customTotal) - Number(item.discountAmount);
+      const basePrice = Number(item.baseUnitPrice);
+      const customPrice = Number(item.customUnitPrice);
+      const quantity = parseFloat(item.quantity.toString());
+      const itemTotal = Number(item.customTotal) - Number(item.discountAmount);
+      const itemOriginalTotal = basePrice * quantity;
+
+      originalSubtotal += itemOriginalTotal;
+
+      // Chegirma foizi (faqat narx pasaytirilgan bo'lsa)
+      const itemDiscountPercent = basePrice > 0 && customPrice < basePrice
+        ? parseFloat(((1 - customPrice / basePrice) * 100).toFixed(1))
+        : 0;
 
       cell(`${idx + 1}`, col.no.x, y, col.no.w, { align: 'center', color: '#64748b', size: 8 });
+
       doc.save()
         .font('Helvetica').fontSize(9).fillColor('#1e293b')
         .text(item.productNameSnapshot, col.name.x + 4, y + 3, { width: col.name.w - 8, lineBreak: true })
         .restore();
-      cell(String(parseFloat(item.quantity.toString())), col.qty.x, y, col.qty.w, { align: 'center' });
-      cell(fmt(item.customUnitPrice), col.price.x, y, col.price.w, { align: 'right' });
-      cell(fmt(total), col.total.x, y, col.total.w, { align: 'right', bold: true });
+
+      cell(String(quantity), col.qty.x, y, col.qty.w, { align: 'center' });
+
+      if (hasAnyDiscount) {
+        // Asl narx — chegirma bo'lsa kulrang chizilgan, bo'lmasa oddiy
+        if (itemDiscountPercent > 0) {
+          doc.save()
+            .font('Helvetica').fontSize(8).fillColor('#94a3b8')
+            .text(fmt(basePrice), col.origPrice.x + 4, y + 3, {
+              width: col.origPrice.w - 8, align: 'right', lineBreak: false,
+            })
+            .restore();
+          // Ustidan chiziq
+          const tx = col.origPrice.x + 4;
+          const tw = col.origPrice.w - 8;
+          const ty = y + 3 + 4;
+          doc.save()
+            .moveTo(tx, ty).lineTo(tx + tw, ty)
+            .lineWidth(0.8).strokeColor('#94a3b8').stroke()
+            .restore();
+
+          // Chegirma badge — foiz
+          const badgeText = `-${itemDiscountPercent}%`;
+          fillRect(col.discount.x + 4, y + 3, col.discount.w - 8, 14, '#fef3c7');
+          doc.save()
+            .font('Helvetica-Bold').fontSize(8).fillColor('#d97706')
+            .text(badgeText, col.discount.x + 4, y + 5, {
+              width: col.discount.w - 8, align: 'center', lineBreak: false,
+            })
+            .restore();
+        } else {
+          // Chegirma yo'q — asl narx oddiy ko'rsatiladi
+          cell(fmt(basePrice), col.origPrice.x, y, col.origPrice.w, { align: 'right', color: '#94a3b8', size: 8 });
+          cell('-', col.discount.x, y, col.discount.w, { align: 'center', color: '#cbd5e1', size: 8 });
+        }
+      }
+
+      // Sotish narxi — chegirma bo'lsa to'q ko'k
+      cell(
+        fmt(customPrice),
+        col.price.x, y, col.price.w,
+        { align: 'right', color: itemDiscountPercent > 0 ? '#1d4ed8' : '#1a1a1a', bold: itemDiscountPercent > 0 }
+      );
+
+      cell(fmt(itemTotal), col.total.x, y, col.total.w, { align: 'right', bold: true });
 
       hline(y + rowH, 0.3, '#e2e8f0');
       vlines.forEach(vx => {
@@ -183,20 +267,78 @@ export class ReceiptService {
       y += rowH;
     });
 
-    const tableH = 22 + sale.items.reduce((s, item) => {
-      const nameLines = Math.ceil(item.productNameSnapshot.length / 28);
+    // Jadval chegarasi
+    const tableStartY = y - sale.items.reduce((s, item) => {
+      const nameLines = Math.ceil(item.productNameSnapshot.length / (hasAnyDiscount ? 22 : 28));
       return s + Math.max(20, nameLines * 12 + 8);
-    }, 0);
-    doc.save().rect(L, y - tableH, PW, tableH).lineWidth(0.8).strokeColor('#1e293b').stroke().restore();
+    }, 0) - 22;
+    doc.save().rect(L, tableStartY, PW, y - tableStartY).lineWidth(0.8).strokeColor('#1e293b').stroke().restore();
 
     y += 6;
 
-    if (Number(sale.totalDiscount) > 0) {
-      doc.save().font('Helvetica').fontSize(9).fillColor('#64748b')
-        .text(`Chegirma: -${fmt(sale.totalDiscount)}`, L, y, { width: PW, align: 'right' })
+    // ── Chegirma xulosasi ──
+    const grandTotal = Number(sale.grandTotal);
+    const totalDiscount = Number(sale.totalDiscount);
+
+    // Narx o'zgartirishdan chegirma (har bir mahsulot uchun)
+    const priceDiscount = originalSubtotal - (originalSubtotal - (originalSubtotal - grandTotal - totalDiscount > 0 ? originalSubtotal - grandTotal - totalDiscount : 0));
+    const itemLevelDiscount = originalSubtotal - grandTotal - totalDiscount;
+
+    // Mahsulot narx chegirmasi (customUnitPrice < baseUnitPrice farqi)
+    const itemPriceDiscountTotal = sale.items.reduce((sum, item) => {
+      const base = Number(item.baseUnitPrice);
+      const custom = Number(item.customUnitPrice);
+      const qty = parseFloat(item.quantity.toString());
+      return sum + Math.max(0, (base - custom) * qty);
+    }, 0);
+
+    const overallDiscountPercent = originalSubtotal > 0
+      ? parseFloat(((1 - grandTotal / originalSubtotal) * 100).toFixed(2))
+      : 0;
+
+    // Narx chegirmasi qatori
+    if (itemPriceDiscountTotal > 0) {
+      const pct = originalSubtotal > 0
+        ? parseFloat(((itemPriceDiscountTotal / originalSubtotal) * 100).toFixed(2))
+        : 0;
+      fillRect(L, y, PW, 18, '#eff6ff');
+      doc.save().font('Helvetica').fontSize(9).fillColor('#3b82f6')
+        .text(`Narx chegirmasi (-${pct}%)`, L + 8, y + 4)
         .restore();
-      y += 16;
+      doc.save().font('Helvetica-Bold').fontSize(9).fillColor('#3b82f6')
+        .text(`-${fmt(itemPriceDiscountTotal)}`, L, y + 4, { width: PW - 8, align: 'right' })
+        .restore();
+      y += 18;
     }
+
+    // Qo'shimcha chegirma (discountAmount)
+    if (totalDiscount > 0) {
+      const pct = originalSubtotal > 0
+        ? parseFloat(((totalDiscount / originalSubtotal) * 100).toFixed(2))
+        : 0;
+      fillRect(L, y, PW, 18, '#fef9c3');
+      doc.save().font('Helvetica').fontSize(9).fillColor('#ca8a04')
+        .text(`Qo'shimcha chegirma (-${pct}%)`, L + 8, y + 4)
+        .restore();
+      doc.save().font('Helvetica-Bold').fontSize(9).fillColor('#ca8a04')
+        .text(`-${fmt(totalDiscount)}`, L, y + 4, { width: PW - 8, align: 'right' })
+        .restore();
+      y += 18;
+    }
+
+    // Umumiy chegirma foizi satrini ko'rsatish (agar chegirma bo'lsa)
+    if (overallDiscountPercent > 0) {
+      fillRect(L, y, PW, 18, '#f0fdf4');
+      doc.save().font('Helvetica').fontSize(9).fillColor('#16a34a')
+        .text(`Umumiy tejam`, L + 8, y + 4)
+        .restore();
+      doc.save().font('Helvetica-Bold').fontSize(9).fillColor('#16a34a')
+        .text(`-${fmt(originalSubtotal - grandTotal)} (${overallDiscountPercent}%)`, L, y + 4, { width: PW - 8, align: 'right' })
+        .restore();
+      y += 18;
+    }
+
+    y += 4;
 
     // ── Grand Total ──
     fillRect(L, y, PW, 28, '#1e293b');
@@ -204,8 +346,16 @@ export class ReceiptService {
       .text('JAMI SUMMA:', L + 8, y + 7)
       .restore();
     doc.save().font('Helvetica-Bold').fontSize(14).fillColor('#fbbf24')
-      .text(fmt(sale.grandTotal), L, y + 5, { width: PW - 8, align: 'right' })
+      .text(fmt(grandTotal), L, y + 5, { width: PW - 8, align: 'right' })
       .restore();
+
+    // Agar chegirma bo'lsa, asl narxni ham ko'rsat
+    if (overallDiscountPercent > 0) {
+      doc.save().font('Helvetica').fontSize(8).fillColor('#94a3b8')
+        .text(`(Asl: ${fmt(originalSubtotal)})`, L + 8, y + 18)
+        .restore();
+    }
+
     y += 36;
 
     // ── PAYMENTS ──

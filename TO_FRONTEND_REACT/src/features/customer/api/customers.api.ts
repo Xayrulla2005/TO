@@ -5,7 +5,7 @@ export interface Customer {
   name: string;
   phone: string;
   notes?: string;
-  totalDebt: number;   // ✅ backend dan keladi
+  totalDebt: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -25,25 +25,12 @@ export interface CustomerSalesHistory {
   limit: number;
 }
 
-export interface Sale {
-  id: string;
-  saleNumber: string;
-  grandTotal: number;
-  subtotal: number;
-  totalDiscount: number;
-  status: string;
-  completedAt?: string;
-  createdAt: string;
-  items: SaleItem[];
-  payments: Payment[];
-  debt?: Debt;
-}
-
 export interface SaleItem {
   id: string;
   productNameSnapshot: string;
   quantity: number;
   customUnitPrice: number;
+  baseUnitPrice: number;
   customTotal: number;
   discountAmount: number;
   unitSnapshot: string;
@@ -62,6 +49,42 @@ export interface Debt {
   status: 'PENDING' | 'PARTIALLY_PAID' | 'PAID' | 'CANCELLED';
   debtorName: string;
   debtorPhone: string;
+}
+
+export interface ReturnItem {
+  id: string;
+  saleItemId: string;
+  productName: string;
+  quantity: number;
+  refundUnitPrice: number;
+  refundTotal: number;
+  reason?: string;
+}
+
+export interface SaleReturn {
+  id: string;
+  returnNumber: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  refundAmount: number;
+  reason?: string;
+  notes?: string;
+  createdAt: string;
+  items: ReturnItem[];
+}
+
+export interface Sale {
+  id: string;
+  saleNumber: string;
+  grandTotal: number;
+  subtotal: number;
+  totalDiscount: number;
+  status: string;
+  completedAt?: string;
+  createdAt: string;
+  items: SaleItem[];
+  payments: Payment[];
+  debt?: Debt;
+  returns?: SaleReturn[];
 }
 
 export const customersApi = {
@@ -96,6 +119,22 @@ export const customersApi = {
 
   getStats: async (id: string): Promise<CustomerStats> => {
     const { data } = await api.get(`/customers/${id}/stats`);
+    return data;
+  },
+
+  // ── Qaytarish API ──
+  createReturn: async (payload: {
+    originalSaleId: string;
+    reason?: string;
+    notes?: string;
+    items: { saleItemId: string; quantity: number; reason?: string }[];
+  }): Promise<SaleReturn> => {
+    const { data } = await api.post('/returns', payload);
+    return data;
+  },
+
+  getReturnReceipt: async (returnId: string): Promise<Blob> => {
+    const { data } = await api.get(`/returns/${returnId}/receipt`, { responseType: 'blob' });
     return data;
   },
 };

@@ -25,7 +25,6 @@ function fmt(val: number | string | null | undefined): string {
   return '$' + formatted;
 }
 
-// Keraksiz nollarni olib tashlash: 20.0000 → 20, 1.5000 → 1.5
 function fmtQty(val: number | string | null | undefined): string {
   return String(parseFloat(parseFloat(String(val || 0)).toFixed(4)));
 }
@@ -117,16 +116,36 @@ export function SalesPage() {
     setAgreedPrice(null);
   };
 
+  // ── Har bir mahsulot narxini alohida o'zgartirish ──
+  const updatePrice = (productId: string, price: number) => {
+    setCart((prev) =>
+      prev.map(i => i.product.id === productId ? { ...i, unitPrice: Math.max(0, price) } : i)
+    );
+    setAgreedPrice(null);
+  };
+
   const removeFromCart = (productId: string) => {
     setCart((prev) => prev.filter(i => i.product.id !== productId));
     setAgreedPrice(null);
   };
 
   const subtotal = parseFloat(cart.reduce((sum, i) => sum + i.qty * i.unitPrice, 0).toFixed(10));
+
+  // originalSubtotal — chegirmasiz asl narxlar bo'yicha jami (foiz hisoblash uchun)
+  const originalSubtotal = parseFloat(
+    cart.reduce((sum, i) => sum + i.qty * Number(i.product.salePrice), 0).toFixed(10)
+  );
+
   const grandTotal = agreedPrice !== null && agreedPrice !== '' && !String(agreedPrice).endsWith('.')
     ? parseFloat(Number(agreedPrice).toFixed(10))
     : subtotal;
+
   const totalItems = cart.reduce((sum, i) => sum + i.qty, 0);
+
+  // Chegirma foizi (kelishilgan narx yoki narx o'zgartirishdan)
+  const discountPercent = originalSubtotal > 0
+    ? parseFloat((((originalSubtotal - grandTotal) / originalSubtotal) * 100).toFixed(2))
+    : 0;
 
   const filteredProducts = sortProducts(
     (products || []).filter((p: Product) => {
@@ -259,17 +278,25 @@ export function SalesPage() {
                 </div>
               ) : (
                 cart.map((item) => (
-                  <CartItemRow key={item.product.id} item={item} onUpdateQty={updateQty} onRemove={removeFromCart} />
+                  <CartItemRow
+                    key={item.product.id}
+                    item={item}
+                    onUpdateQty={updateQty}
+                    onUpdatePrice={updatePrice}
+                    onRemove={removeFromCart}
+                  />
                 ))
               )}
             </div>
 
             <CartFooter
               subtotal={subtotal}
+              originalSubtotal={originalSubtotal}
               cart={cart}
               onPay={() => setIsPaymentModalOpen(true)}
               agreedPrice={agreedPrice}
               onAgreedPriceChange={setAgreedPrice}
+              discountPercent={discountPercent}
             />
           </Card>
         </div>
@@ -296,16 +323,24 @@ export function SalesPage() {
                     </div>
                   ) : (
                     cart.map((item) => (
-                      <CartItemRow key={item.product.id} item={item} onUpdateQty={updateQty} onRemove={removeFromCart} />
+                      <CartItemRow
+                        key={item.product.id}
+                        item={item}
+                        onUpdateQty={updateQty}
+                        onUpdatePrice={updatePrice}
+                        onRemove={removeFromCart}
+                      />
                     ))
                   )}
                 </div>
                 <CartFooter
                   subtotal={subtotal}
+                  originalSubtotal={originalSubtotal}
                   cart={cart}
                   onPay={() => { setIsCartOpen(false); setIsPaymentModalOpen(true); }}
                   agreedPrice={agreedPrice}
                   onAgreedPriceChange={setAgreedPrice}
+                  discountPercent={discountPercent}
                 />
               </div>
             </div>
@@ -373,12 +408,20 @@ export function SalesPage() {
 }
 
 // ───── CartItemRow ─────
-function CartItemRow({ item, onUpdateQty, onRemove }: {
+function CartItemRow({ item, onUpdateQty, onUpdatePrice, onRemove }: {
   item: CartItem;
   onUpdateQty: (id: string, qty: number) => void;
+  onUpdatePrice: (id: string, price: number) => void;
   onRemove: (id: string) => void;
 }) {
   const [qtyInput, setQtyInput] = useState(String(item.qty));
+  const [priceInput, setPriceInput] = useState(String(item.unitPrice));
+
+  const originalPrice = Number(item.product.salePrice);
+  const currentPrice = Number(item.unitPrice);
+  const itemDiscountPercent = originalPrice > 0 && currentPrice < originalPrice
+    ? parseFloat(((1 - currentPrice / originalPrice) * 100).toFixed(1))
+    : 0;
 
   return (
     <div className="bg-gray-50 rounded-xl border border-gray-100 p-2.5 space-y-2">
@@ -394,14 +437,23 @@ function CartItemRow({ item, onUpdateQty, onRemove }: {
         </div>
         <div className="flex-1 min-w-0">
           <p className="font-semibold text-gray-900 text-xs leading-tight line-clamp-2">{item.product.name}</p>
-          <p className="text-xs text-gray-400">Narx: {fmt(item.product.salePrice)}</p>
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <p className="text-xs text-gray-400">Asl narx: {fmt(originalPrice)}</p>
+            {itemDiscountPercent > 0 && (
+              <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full font-bold">
+                -{itemDiscountPercent}%
+              </span>
+            )}
+          </div>
         </div>
         <button onClick={() => onRemove(item.product.id)} className="p-1 text-gray-300 hover:text-red-500 flex-shrink-0">
           <Trash2 size={15} />
         </button>
       </div>
 
-      <div className="flex items-center gap-2">
+      {/* Soni va Narx qatori */}
+      <div className="flex items-center gap-2 flex-wrap">
+        {/* Soni */}
         <div className="flex items-center gap-1">
           <span className="text-xs text-gray-400">Soni:</span>
           <input
@@ -423,31 +475,93 @@ function CartItemRow({ item, onUpdateQty, onRemove }: {
             min={0.001}
           />
         </div>
-        <span className="text-gray-300 text-xs">x</span>
-        <p className="text-xs text-gray-500">{fmt(item.unitPrice)}</p>
-        <p className="font-bold text-indigo-600 text-sm flex-shrink-0 ml-auto">{fmt(item.qty * item.unitPrice)}</p>
+
+        <span className="text-gray-300 text-xs">×</span>
+
+        {/* Narx — tahrirlash mumkin */}
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-gray-400">Narx:</span>
+          <div className="relative">
+            <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-xs text-orange-400 font-bold pointer-events-none">$</span>
+            <input
+              type="number"
+              step="any"
+              value={priceInput}
+              onChange={(e) => {
+                const raw = e.target.value;
+                setPriceInput(raw);
+                const val = parseFloat(raw);
+                if (!isNaN(val) && val >= 0) onUpdatePrice(item.product.id, val);
+              }}
+              onBlur={() => {
+                const val = parseFloat(priceInput);
+                if (isNaN(val) || val < 0) {
+                  setPriceInput(String(originalPrice));
+                  onUpdatePrice(item.product.id, originalPrice);
+                } else {
+                  setPriceInput(String(val));
+                }
+              }}
+              className={`w-20 pl-5 pr-1 py-1 text-xs border rounded-lg focus:outline-none text-center font-bold transition-colors ${
+                itemDiscountPercent > 0
+                  ? 'border-orange-300 bg-orange-50 text-orange-700 focus:border-orange-500'
+                  : 'border-gray-200 bg-white text-gray-700 focus:border-indigo-400'
+              }`}
+              min={0}
+            />
+          </div>
+        </div>
+
+        {/* Jami narx */}
+        <p className="font-bold text-indigo-600 text-sm flex-shrink-0 ml-auto">
+          {fmt(item.qty * item.unitPrice)}
+        </p>
       </div>
     </div>
   );
 }
 
 // ───── CartFooter ─────
-function CartFooter({ subtotal, cart, onPay, agreedPrice, onAgreedPriceChange }: {
+function CartFooter({ subtotal, originalSubtotal, cart, onPay, agreedPrice, onAgreedPriceChange }: {
   subtotal: number;
+  originalSubtotal: number;
   cart: CartItem[];
   onPay: () => void;
   agreedPrice: number | string | null;
   onAgreedPriceChange: (val: number | string | null) => void;
+  discountPercent: number;
 }) {
-  const displayTotal = agreedPrice !== null ? agreedPrice : subtotal;
+  const displayTotal = agreedPrice !== null && agreedPrice !== '' ? Number(agreedPrice) : subtotal;
+
+  // Kelishilgan narx bo'yicha chegirma foizi
+  const agreedDiscountPercent = originalSubtotal > 0 && displayTotal < originalSubtotal
+    ? parseFloat(((1 - displayTotal / originalSubtotal) * 100).toFixed(2))
+    : 0;
 
   return (
     <div className="p-3 border-t border-gray-100 bg-white space-y-2">
+      {/* Asl narxlar jami */}
+      {originalSubtotal !== subtotal && (
+        <div className="flex justify-between text-xs text-gray-400">
+          <span>Asl narx jami</span>
+          <span className="line-through">{fmt(originalSubtotal)}</span>
+        </div>
+      )}
+
+      {/* Mahsulot narxi o'zgartirishidan chegirma */}
+      {subtotal < originalSubtotal && (
+        <div className="flex justify-between text-xs text-green-600">
+          <span>Narx chegirmasi</span>
+          <span>-{fmt(originalSubtotal - subtotal)} ({parseFloat(((1 - subtotal / originalSubtotal) * 100).toFixed(2))}%)</span>
+        </div>
+      )}
+
       <div className="flex justify-between text-xs text-gray-500">
         <span>Oraliq jami</span>
         <span>{fmt(subtotal)}</span>
       </div>
 
+      {/* Kelishilgan narx */}
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs text-gray-500 whitespace-nowrap">Kelishilgan narx</span>
         <div className="relative">
@@ -460,9 +574,12 @@ function CartFooter({ subtotal, cart, onPay, agreedPrice, onAgreedPriceChange }:
               const raw = e.target.value;
               if (!/^[\d.]*$/.test(raw)) return;
               if ((raw.match(/\./g) || []).length > 1) return;
-              if (raw === '' || raw.endsWith('.')) { onAgreedPriceChange(raw === '' ? null : raw as any); return; }
+              if (raw === '' || raw.endsWith('.')) {
+                onAgreedPriceChange(raw === '' ? null : raw as any);
+                return;
+              }
               const val = Number(raw);
-              if (val < 0 || val > subtotal) return;
+              if (val < 0) return;
               onAgreedPriceChange(val === subtotal ? null : val);
             }}
             className="w-28 pl-6 pr-2 py-1 text-xs border border-indigo-200 rounded-lg focus:outline-none focus:border-indigo-500 text-right bg-indigo-50 font-semibold text-indigo-700"
@@ -470,9 +587,24 @@ function CartFooter({ subtotal, cart, onPay, agreedPrice, onAgreedPriceChange }:
         </div>
       </div>
 
+      {/* Kelishilgan narxdan chegirma foizini ko'rsatish */}
+      {agreedDiscountPercent > 0 && (
+        <div className="flex justify-between text-xs text-orange-600 bg-orange-50 rounded-lg px-2 py-1">
+          <span>Kelishilgan chegirma</span>
+          <span className="font-bold">-{agreedDiscountPercent}% ({fmt(originalSubtotal - displayTotal)})</span>
+        </div>
+      )}
+
       <div className="flex justify-between text-base font-bold text-gray-900 pt-1.5 border-t border-gray-100">
         <span>Jami</span>
-        <span className="text-indigo-600">{fmt(displayTotal)}</span>
+        <div className="flex items-center gap-2">
+          {agreedDiscountPercent > 0 && (
+            <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-bold">
+              -{agreedDiscountPercent}%
+            </span>
+          )}
+          <span className="text-indigo-600">{fmt(displayTotal)}</span>
+        </div>
       </div>
 
       <Button size="lg" className="w-full text-sm font-bold" onClick={onPay} disabled={cart.length === 0}>

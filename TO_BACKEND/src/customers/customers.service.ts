@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, ILike, DataSource } from 'typeorm';
+import { Repository, ILike } from 'typeorm';
 import { CustomerEntity } from './entities/customer.entity';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
@@ -15,7 +15,6 @@ export class CustomersService {
     private readonly saleRepo: Repository<SaleEntity>,
   ) {}
 
-  // ── Barchasi (qidiruv + totalDebt bilan) ─────────────────
   async findAll(search?: string): Promise<(CustomerEntity & { totalDebt: number })[]> {
     let customers: CustomerEntity[];
 
@@ -33,7 +32,6 @@ export class CustomersService {
 
     if (customers.length === 0) return [];
 
-    // Barcha mijozlar uchun qarz summalarini bitta query da olamiz
     const customerIds = customers.map(c => c.id);
 
     const debtRows = await this.saleRepo
@@ -58,19 +56,16 @@ export class CustomersService {
     }));
   }
 
-  // ── Bitta mijoz ───────────────────────────────────────────
   async findOne(id: string): Promise<CustomerEntity> {
     const customer = await this.repo.findOne({ where: { id } });
     if (!customer) throw new NotFoundException('Mijoz topilmadi');
     return customer;
   }
 
-  // ── Telefon bo'yicha topish ───────────────────────────────
   async findByPhone(phone: string): Promise<CustomerEntity | null> {
     return this.repo.findOne({ where: { phone } });
   }
 
-  // ── Yaratish ──────────────────────────────────────────────
   async create(dto: CreateCustomerDto): Promise<CustomerEntity> {
     const existing = await this.findByPhone(dto.phone);
     if (existing) throw new ConflictException('Bu telefon raqam allaqachon mavjud');
@@ -78,7 +73,6 @@ export class CustomersService {
     return this.repo.save(customer);
   }
 
-  // ── Yangilash ─────────────────────────────────────────────
   async update(id: string, dto: UpdateCustomerDto): Promise<CustomerEntity> {
     const customer = await this.findOne(id);
     if (dto.phone && dto.phone !== customer.phone) {
@@ -89,14 +83,13 @@ export class CustomersService {
     return this.repo.save(customer);
   }
 
-  // ── O'chirish ─────────────────────────────────────────────
   async remove(id: string): Promise<{ success: boolean }> {
     const customer = await this.findOne(id);
     await this.repo.remove(customer);
     return { success: true };
   }
 
-  // ── Mijoz savdo tarixi ────────────────────────────────────
+  // ✅ FIX: 'returns' va 'returns.items' relation qo'shildi
   async getSalesHistory(
     customerId: string,
     page = 1,
@@ -109,16 +102,44 @@ export class CustomersService {
         customerId,
         status: SaleStatus.COMPLETED,
       },
-      relations: ['items', 'payments', 'debt'],
+      relations: [
+        'items',
+        'payments',
+        'debt',
+        'returns',          // ✅ qaytarishlar ro'yxati
+        'returns.items',    // ✅ har bir qaytarish ichidagi mahsulotlar
+      ],
       order: { completedAt: 'DESC' },
       skip: (page - 1) * limit,
       take: limit,
     });
 
-    return { data, total, page, limit };
+    // returns.items ichidagi saleItem ni ham yuklaymiz (productName uchun)
+    const enriched = data.map(sale => ({
+      ...sale,
+      returns: (sale.returns || []).map(ret => ({
+        id: ret.id,
+        returnNumber: ret.returnNumber,
+        status: ret.status,
+        refundAmount: Number(ret.refundAmount),
+        reason: ret.reason,
+        notes: ret.notes,
+        createdAt: ret.createdAt,
+        items: (ret.items || []).map(item => ({
+          id: item.id,
+          saleItemId: item.saleItemId,
+          productName: item.saleItem?.productNameSnapshot ?? '',
+          quantity: Number(item.quantity),
+          refundUnitPrice: Number(item.refundUnitPrice),
+          refundTotal: Number(item.refundTotal),
+          reason: item.reason,
+        })),
+      })),
+    }));
+
+    return { data: enriched as unknown as SaleEntity[], total, page, limit };
   }
 
-  // ── Mijoz statistikasi ────────────────────────────────────
   async getStats(customerId: string) {
     await this.findOne(customerId);
 
@@ -132,9 +153,7 @@ export class CustomersService {
 
     let totalDebt = 0;
     for (const sale of sales) {
-      if (sale.debt) {
-        totalDebt += Number(sale.debt.remainingAmount);
-      }
+      if (sale.debt) totalDebt += Number(sale.debt.remainingAmount);
     }
 
     const monthlyStats: Record<string, { count: number; amount: number }> = {};
@@ -155,7 +174,6 @@ export class CustomersService {
     };
   }
 
-  // ── Topish yoki yaratish (savdo jarayonida) ───────────────
   async findOrCreate(name: string, phone: string): Promise<CustomerEntity> {
     const existing = await this.findByPhone(phone);
     if (existing) {

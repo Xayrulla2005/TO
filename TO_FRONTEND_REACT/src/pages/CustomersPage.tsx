@@ -1,10 +1,10 @@
-import { useState, useMemo, useEffect } from "react";
-// totalDebt endi customer.totalDebt dan keladi — /debts?limit=1000 kerak emas
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   customersApi,
   Customer,
   Sale,
+  SaleReturn,
 } from "../features/customer/api/customers.api";
 import { api } from "../shared/lib/axios";
 import { formatCurrency } from "../shared/lib/utils";
@@ -15,28 +15,11 @@ import { Modal } from "../shared/ui/Modal";
 import { Input } from "../shared/ui/Input";
 import { Button } from "../shared/ui/Button";
 import {
-  Search,
-  User,
-  Phone,
-  ChevronRight,
-  Plus,
-  Edit2,
-  Banknote,
-  CreditCard,
-  AlertCircle,
-  BarChart2,
-  ShoppingBag,
-  Trash2,
-  Package,
-  ArrowLeft,
-  FileText,
-  TrendingUp,
-  ChevronDown,
-  ChevronUp,
-  Users,
-  AlertTriangle,
-  DollarSign,
-  Calendar,
+  Search, User, Phone, ChevronRight, Plus, Edit2,
+  Banknote, CreditCard, AlertCircle, BarChart2, ShoppingBag,
+  Trash2, Package, ArrowLeft, FileText, TrendingUp,
+  ChevronDown, ChevronUp, Users, AlertTriangle, DollarSign,
+  Calendar, RotateCcw, X,
 } from "lucide-react";
 
 const fmt = (v: number | string | null | undefined) => `$${formatCurrency(v)}`;
@@ -50,38 +33,517 @@ function groupSalesByDate(sales: Sale[]): { label: string; date: string; sales: 
   }
   return Array.from(groups.entries())
     .sort((a, b) => b[0].localeCompare(a[0]))
-    .map(([date, sales]) => {
+    .map(([date, salesArr]) => {
       const d = parseISO(date);
       let label = format(d, "dd MMMM yyyy", { locale: uz });
       if (isToday(d)) label = "Bugun";
       else if (isYesterday(d)) label = "Kecha";
-      return { label, date, sales };
+      return { label, date, sales: salesArr };
     });
 }
 
 function StatusBadge({ status }: { status: string }) {
   const cfg: Record<string, { cls: string; label: string }> = {
-    PENDING: { cls: "bg-red-100 text-red-700", label: "To'lanmagan" },
+    PENDING:        { cls: "bg-red-100 text-red-700",     label: "To'lanmagan" },
     PARTIALLY_PAID: { cls: "bg-amber-100 text-amber-700", label: "Qisman" },
-    PAID: { cls: "bg-emerald-100 text-emerald-700", label: "To'langan" },
-    CANCELLED: { cls: "bg-gray-100 text-gray-500", label: "Bekor" },
+    PAID:           { cls: "bg-emerald-100 text-emerald-700", label: "To'langan" },
+    CANCELLED:      { cls: "bg-gray-100 text-gray-500",   label: "Bekor" },
   };
   const c = cfg[status] ?? { cls: "bg-gray-100 text-gray-500", label: status };
+  return <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${c.cls}`}>{c.label}</span>;
+}
+
+// ── Debt List Modal — hisob-faktura ko'rinishida ──
+function DebtListModal({ customerId, customerName, customerPhone, onClose, onPayDebt }: {
+  customerId: string;
+  customerName: string;
+  customerPhone: string;
+  onClose: () => void;
+  onPayDebt: (debtId: string, remaining: number) => void;
+}) {
+  const [shareLoading, setShareLoading] = useState(false);
+  const printRef = useRef<HTMLDivElement>(null);
+
+  const { data: salesData, isLoading } = useQuery({
+    queryKey: ["customer-sales-debts", customerId],
+    queryFn: () => customersApi.getSales(customerId, 1, 100),
+  });
+
+  const activeDebts = useMemo(() => {
+    const sales = (salesData?.data ?? []) as Sale[];
+    return sales
+      .filter(s => s.debt && (s.debt.status === "PENDING" || s.debt.status === "PARTIALLY_PAID"))
+      .map(s => ({ sale: s, debt: s.debt! }))
+      .sort((a, b) => new Date(a.sale.completedAt || a.sale.createdAt).getTime()
+                    - new Date(b.sale.completedAt || b.sale.createdAt).getTime());
+  }, [salesData]);
+
+  const totalRemaining = Math.round(activeDebts.reduce((s, { debt }) => s + Number(debt.remainingAmount), 0) * 100) / 100;
+  const totalDebtTaken = Math.round(activeDebts.reduce((s, { debt }) => s + Number(debt.originalAmount), 0) * 100) / 100;
+  const totalPaid      = Math.round((totalDebtTaken - totalRemaining) * 100) / 100;
+
+  // Barcha mahsulotlarni raqamlash uchun
+  let rowNum = 0;
+
+  const handlePrint = () => {
+    if (!printRef.current) return;
+    const win = window.open('', '_blank');
+    if (!win) return;
+    win.document.write(`
+      <html><head><title>Qarz fakturasi - ${customerName}</title>
+      <style>
+        body { font-family: Arial, sans-serif; font-size: 11px; margin: 20px; color: #111; }
+        table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+        th { background: #1e293b; color: white; padding: 6px 8px; text-align: left; font-size: 10px; }
+        td { padding: 5px 8px; border-bottom: 1px solid #e5e7eb; }
+        .section-header { background: #f1f5f9; font-weight: bold; color: #374151; }
+        .debt-row { background: #fef2f2; }
+        .paid-row { background: #f0fdf4; }
+        .remaining-row { background: #fef9c3; font-weight: bold; }
+        .total-row { background: #1e293b; color: white; font-weight: bold; font-size: 12px; }
+        .info { display: flex; justify-content: space-between; margin-bottom: 16px; }
+        .info-block p { margin: 2px 0; }
+        h2 { margin: 0 0 12px; }
+        .right { text-align: right; }
+        @media print { body { margin: 10px; } }
+      </style></head><body>
+      ${printRef.current.innerHTML}
+      </body></html>
+    `);
+    win.document.close();
+    win.focus();
+    setTimeout(() => { win.print(); win.close(); }, 300);
+  };
+
+  const handleCopyText = async () => {
+    const sep = "-".repeat(40);
+    const dateStr = new Date().toLocaleDateString("uz-UZ");
+    // ✅ FIX: totalRemaining ni to'g'ri yaxlitlash
+    const totalRem = totalRemaining; // already rounded above
+    const parts: string[] = [
+      "QARZDORLIK FAKTURASI",
+      "Mijoz: " + customerName + "  |  Tel: " + customerPhone,
+      "Sana: " + dateStr,
+      sep,
+    ];
+    let n = 1;
+    activeDebts.forEach(({ sale, debt }) => {
+      const saleDate = sale.completedAt || sale.createdAt;
+      const remaining = Math.round(Number(debt.remainingAmount) * 100) / 100;
+      const original  = Math.round(Number(debt.originalAmount) * 100) / 100;
+      const paid      = Math.round((Number(debt.originalAmount) - Number(debt.remainingAmount)) * 100) / 100;
+
+      parts.push("");
+      parts.push("📋 " + sale.saleNumber + " — " + format(parseISO(saleDate), "dd.MM.yyyy"));
+      sale.items.forEach((item: any) => {
+        parts.push("  " + n++ + ". " + item.productNameSnapshot + " x" + item.quantity + " = " + fmt(item.customTotal));
+      });
+      parts.push("  Savdo jami:      " + fmt(sale.grandTotal));
+      parts.push("  Qarzga olingan:  " + fmt(original));
+      if (paid > 0) parts.push("  Tolangan:        " + fmt(paid));
+      parts.push("  Qoldiq qarz:     " + fmt(remaining));
+      parts.push(sep);
+    });
+    parts.push("UMUMIY QARZ: " + fmt(totalRem));
+    try {
+      await navigator.clipboard.writeText(parts.join("\n"));
+      toast.success("Matn nusxalandi — Telegram yoki boshqa ilovaga joylashtiring");
+    } catch {
+      toast.error("Nusxalab bolmadi");
+    }
+  };
+
+  if (isLoading) return (
+    <div className="flex items-center justify-center h-32">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-red-500" />
+    </div>
+  );
+
+  if (activeDebts.length === 0) return (
+    <div className="text-center py-8 text-gray-400">
+      <AlertTriangle size={32} className="mx-auto mb-2 opacity-20" />
+      <p className="text-sm">Faol qarzlar yo'q</p>
+    </div>
+  );
+
   return (
-    <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${c.cls}`}>
-      {c.label}
-    </span>
+    <div className="space-y-3">
+      {/* ── Amallar ── */}
+      <div className="flex gap-2">
+        <button onClick={handlePrint}
+          className="flex-1 flex items-center justify-center gap-1.5 bg-indigo-600 text-white text-xs font-semibold py-2 rounded-xl hover:bg-indigo-700 transition-colors">
+          <FileText size={13} /> Print / PDF
+        </button>
+        <button onClick={handleCopyText}
+          className="flex-1 flex items-center justify-center gap-1.5 bg-gray-100 text-gray-700 text-xs font-semibold py-2 rounded-xl hover:bg-gray-200 transition-colors">
+          <Phone size={13} /> Ulashish (copy)
+        </button>
+      </div>
+
+      {/* ── Faktura ── */}
+      <div className="max-h-[65vh] overflow-y-auto rounded-xl border border-gray-200 shadow-sm" ref={printRef}>
+
+        {/* Faktura sarlavhasi */}
+        <div className="bg-gray-800 px-4 py-3">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-white font-bold text-sm">QARZDORLIK FAKTURASI</p>
+              <p className="text-gray-300 text-xs mt-0.5">{new Date().toLocaleDateString('uz-UZ', { day:'numeric', month:'long', year:'numeric' })}</p>
+            </div>
+            <div className="text-right">
+              <p className="text-white font-bold text-sm">{customerName}</p>
+              <p className="text-gray-300 text-xs mt-0.5">{customerPhone}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Jadval */}
+        <table className="w-full text-xs border-collapse">
+          <thead>
+            <tr className="bg-gray-100 border-b border-gray-200">
+              <th className="text-center px-2 py-2 font-semibold text-gray-500 w-8">№</th>
+              <th className="text-left px-3 py-2 font-semibold text-gray-500">Mahsulot nomi</th>
+              <th className="text-center px-2 py-2 font-semibold text-gray-500 w-14">Miqdor</th>
+              <th className="text-center px-2 py-2 font-semibold text-gray-500 w-16">Narxi</th>
+              <th className="text-right px-3 py-2 font-semibold text-gray-500 w-16">Summa</th>
+            </tr>
+          </thead>
+          <tbody>
+            {activeDebts.map(({ sale, debt }, sIdx) => {
+              const saleDate   = sale.completedAt || sale.createdAt;
+              const paidAmount = Math.round((Number(debt.originalAmount) - Number(debt.remainingAmount)) * 100) / 100;
+              const debtOriginal = Number(debt.originalAmount);
+              const debtRemaining = Math.round(Number(debt.remainingAmount) * 100) / 100;
+              const isPartial  = debt.status === "PARTIALLY_PAID";
+              const bgAlt      = sIdx % 2 === 0 ? "bg-white" : "bg-slate-50/60";
+
+              return (
+                <>
+                  {/* Savdo ajratuvchi qatori */}
+                  <tr key={`h-${debt.id}`} className="bg-slate-700">
+                    <td colSpan={5} className="px-3 py-1.5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-white font-bold">#{sale.saleNumber}</span>
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
+                            isPartial ? "bg-amber-400 text-amber-900" : "bg-red-400 text-white"
+                          }`}>
+                            {isPartial ? "Qisman" : "To'lanmagan"}
+                          </span>
+                        </div>
+                        <span className="text-gray-300 text-xs">
+                          {format(parseISO(saleDate), "dd.MM.yyyy  HH:mm")}
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+
+                  {/* Mahsulot qatorlari */}
+                  {sale.items.map((item) => {
+                    rowNum++;
+                    return (
+                      <tr key={item.id} className={`border-b border-gray-100 ${bgAlt}`}>
+                        <td className="text-center px-2 py-1.5 text-gray-400">{rowNum}</td>
+                        <td className="px-3 py-1.5 text-gray-700">{item.productNameSnapshot}</td>
+                        <td className="text-center px-2 py-1.5 text-gray-500">{item.quantity}</td>
+                        <td className="text-center px-2 py-1.5 text-gray-500">{fmt(item.customUnitPrice)}</td>
+                        <td className="text-right px-3 py-1.5 font-medium text-gray-800">{fmt(item.customTotal)}</td>
+                      </tr>
+                    );
+                  })}
+
+                  {/* Savdo moliyaviy xulosa */}
+                  <tr key={`total-${debt.id}`} className={`border-b border-gray-200 ${bgAlt}`}>
+                    <td colSpan={4} className="px-3 py-1.5 text-gray-400 text-right text-xs border-t border-dashed border-gray-200">
+                      Savdo jami
+                    </td>
+                    <td className="px-3 py-1.5 text-right font-semibold text-gray-700 border-t border-dashed border-gray-200">
+                      {fmt(sale.grandTotal)}
+                    </td>
+                  </tr>
+                  <tr key={`debt-${debt.id}`} className="bg-red-50">
+                    <td colSpan={4} className="px-3 py-1.5 text-red-600 text-right text-xs font-medium">
+                      Qarzga olingan
+                    </td>
+                    <td className="px-3 py-1.5 text-right font-bold text-red-600">
+                      {fmt(Number(debt.originalAmount))}
+                    </td>
+                  </tr>
+                  {isPartial && (
+                    <>
+                      <tr key={`paid-${debt.id}`} className="bg-emerald-50">
+                        <td colSpan={4} className="px-3 py-1.5 text-emerald-600 text-right text-xs font-medium">
+                          To'langan qismi
+                        </td>
+                        <td className="px-3 py-1.5 text-right font-bold text-emerald-600">
+                          {fmt(paidAmount)}
+                        </td>
+                      </tr>
+                      <tr key={`rem-${debt.id}`} className="bg-amber-50 border-b-2 border-amber-200">
+                        <td colSpan={4} className="px-3 py-2 text-amber-700 text-right text-xs font-bold">
+                          Qoldiq qarz
+                        </td>
+                        <td className="px-3 py-2 text-right font-black text-amber-700">
+                          {fmt(debtRemaining)}
+                        </td>
+                      </tr>
+                    </>
+                  )}
+                  {!isPartial && (
+                    <tr key={`undirm-${debt.id}`} className="bg-red-100 border-b-2 border-red-200">
+                      <td colSpan={4} className="px-3 py-2 text-red-700 text-right text-xs font-bold">
+                        Undirilmagan qarz
+                      </td>
+                      <td className="px-3 py-2 text-right font-black text-red-700">
+                        {fmt(debtRemaining)}
+                      </td>
+                    </tr>
+                  )}
+                </>
+              );
+            })}
+
+            {/* Umumiy jami qatori */}
+            <tr className="bg-gray-800">
+              <td colSpan={2} className="px-3 py-3 text-white font-bold text-sm">
+                Jami: {activeDebts.length} ta savdo
+              </td>
+              <td colSpan={2} className="px-3 py-3 text-gray-300 text-right text-xs">
+                Jami olingan qarz: {fmt(totalDebtTaken)}
+                {totalPaid > 0 && <span className="ml-3 text-emerald-400">To'langan: {fmt(totalPaid)}</span>}
+              </td>
+              <td className="px-3 py-3 text-right">
+                <p className="text-yellow-400 font-black text-base">{fmt(totalRemaining)}</p>
+                <p className="text-gray-400 text-xs">umumiy qarz</p>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      {/* To'lash — birinchi (eng qadimgi) qarzdan boshlash */}
+      {activeDebts.length > 0 && (
+        <button
+          onClick={() => {
+            const first = activeDebts[0];
+            onPayDebt(first.debt.id, first.debt.remainingAmount);
+            onClose();
+          }}
+          className="w-full bg-emerald-600 text-white text-sm py-3 rounded-xl font-bold hover:bg-emerald-700 active:scale-95 transition-all flex items-center justify-center gap-2"
+        >
+          <DollarSign size={15} />
+          To'lash — {fmt(activeDebts[0].debt.remainingAmount)}
+          {activeDebts.length > 1 && (
+            <span className="text-xs opacity-75">(#{activeDebts[0].sale.saleNumber})</span>
+          )}
+        </button>
+      )}
+    </div>
+  );
+}
+// ── Return Modal ─────────────────────────────────────────────
+function ReturnModal({ sale, onClose }: { sale: Sale; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [quantities, setQuantities] = useState<Record<string, string>>(
+    Object.fromEntries(sale.items.map((i) => [i.id, "0"]))
+  );
+  const [reason, setReason] = useState("");
+  const [done, setDone] = useState(false);
+  const [returnResult, setReturnResult] = useState<SaleReturn | null>(null);
+  const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
+  const [loadingReceipt, setLoadingReceipt] = useState(false);
+
+  const selectedItems = sale.items
+    .map((item) => ({ item, qty: parseFloat(quantities[item.id] || "0") }))
+    .filter(({ qty }) => qty > 0);
+
+  const totalRefund = selectedItems.reduce(
+    (s, { item, qty }) => s + qty * item.customUnitPrice, 0
+  );
+
+  const downloadReceipt = async (returnId: string) => {
+    setLoadingReceipt(true);
+    try {
+      const blob = await customersApi.getReturnReceipt(returnId);
+      const url = window.URL.createObjectURL(new Blob([blob], { type: "application/pdf" }));
+      setReceiptUrl(url);
+    } catch {
+      toast.error("Chek yuklanmadi");
+    } finally {
+      setLoadingReceipt(false);
+    }
+  };
+
+  const mutation = useMutation({
+    mutationFn: () =>
+      customersApi.createReturn({
+        originalSaleId: sale.id,
+        reason: reason || undefined,
+        items: selectedItems.map(({ item, qty }) => ({
+          saleItemId: item.id,
+          quantity: qty,
+          reason: reason || undefined,
+        })),
+      }),
+    onSuccess: async (result) => {
+      toast.success("Qaytarish so'rovi yaratildi");
+      qc.invalidateQueries({ queryKey: ["customer-sales"] });
+      qc.invalidateQueries({ queryKey: ["customers"] });
+      setReturnResult(result);
+      setDone(true);
+      await downloadReceipt(result.id);
+    },
+    onError: (e: any) => toast.error(e?.response?.data?.message ?? "Xatolik yuz berdi"),
+  });
+
+  if (done) {
+    return (
+      <div className="space-y-3">
+        <div className="bg-purple-50 border border-purple-200 rounded-xl p-4 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center flex-shrink-0">
+            <RotateCcw size={18} className="text-purple-600" />
+          </div>
+          <div>
+            <p className="font-semibold text-purple-800 text-sm">Qaytarish yaratildi!</p>
+            <p className="text-xs text-purple-600">
+              #{returnResult?.returnNumber} · Admin tasdiqlashini kuting
+            </p>
+          </div>
+        </div>
+        <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 text-xs text-amber-800">
+          <span className="font-semibold">Eslatma:</span> Qaytarish Admin tomonidan tasdiqlanganidan keyin stok tiklanadi.
+        </div>
+        {loadingReceipt ? (
+          <div className="flex items-center justify-center h-40">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600" />
+          </div>
+        ) : receiptUrl ? (
+          <>
+            <div className="rounded-xl overflow-hidden border border-gray-100" style={{ height: "50vh" }}>
+              <iframe src={receiptUrl} className="w-full h-full" title="Qaytarish cheki" />
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => { const f = document.querySelector("iframe") as HTMLIFrameElement; f?.contentWindow?.print(); }}
+                className="flex-1 bg-purple-600 text-white py-2.5 rounded-xl font-semibold text-sm"
+              >Print</button>
+              <a
+                href={receiptUrl}
+                download={`return-${returnResult?.returnNumber}.pdf`}
+                className="flex-1 bg-gray-100 text-gray-700 text-center py-2.5 rounded-xl font-semibold text-sm flex items-center justify-center"
+              >PDF yuklash</a>
+            </div>
+          </>
+        ) : null}
+        <button onClick={onClose} className="w-full py-2.5 border-2 border-gray-200 rounded-xl text-gray-600 font-semibold text-sm hover:bg-gray-50 transition-colors">
+          Yopish
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-gray-50 rounded-xl p-3 text-xs text-gray-600 flex items-center justify-between">
+        <span>Savdo: <span className="font-semibold">#{sale.saleNumber}</span></span>
+        <span>Jami: <span className="font-semibold text-indigo-700">{fmt(sale.grandTotal)}</span></span>
+      </div>
+
+      <div className="space-y-2 max-h-64 overflow-y-auto">
+        {sale.items.map((item) => {
+          const qty = parseFloat(quantities[item.id] || "0");
+          const max = item.quantity;
+          const isSelected = qty > 0;
+          return (
+            <div key={item.id} className={`rounded-xl border p-3 transition-all ${
+              isSelected ? "border-purple-300 bg-purple-50/40" : "border-gray-100 bg-white"
+            }`}>
+              <div className="flex items-start justify-between gap-2 mb-2">
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold text-gray-900 leading-tight line-clamp-2">
+                    {item.productNameSnapshot}
+                  </p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {fmt(item.customUnitPrice)} · Jami: {item.quantity} {item.unitSnapshot}
+                  </p>
+                </div>
+                {isSelected && (
+                  <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-bold flex-shrink-0">
+                    -{fmt(qty * item.customUnitPrice)}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-500 flex-shrink-0">Qaytarish:</span>
+                <button
+                  onClick={() => {
+                    const cur = parseFloat(quantities[item.id] || "0");
+                    if (cur > 0) setQuantities((p) => ({ ...p, [item.id]: String(cur - 1) }));
+                  }}
+                  className="w-7 h-7 rounded-lg bg-gray-100 text-gray-600 font-bold flex items-center justify-center hover:bg-gray-200 transition-colors"
+                >−</button>
+                <input
+                  type="number" min={0} max={max} step="any"
+                  value={quantities[item.id]}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    const num = parseFloat(val);
+                    if (val === "" || val === "0") { setQuantities((p) => ({ ...p, [item.id]: val })); return; }
+                    if (!isNaN(num) && num >= 0 && num <= max) setQuantities((p) => ({ ...p, [item.id]: val }));
+                  }}
+                  className="w-14 text-center text-xs border border-gray-200 rounded-lg py-1 focus:outline-none focus:border-purple-400 font-bold"
+                />
+                <button
+                  onClick={() => {
+                    const cur = parseFloat(quantities[item.id] || "0");
+                    if (cur < max) setQuantities((p) => ({ ...p, [item.id]: String(cur + 1) }));
+                  }}
+                  className="w-7 h-7 rounded-lg bg-gray-100 text-gray-600 font-bold flex items-center justify-center hover:bg-gray-200 transition-colors"
+                >+</button>
+                <span className="text-xs text-gray-400">/ {max}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div>
+        <label className="text-xs font-semibold text-gray-600 mb-1.5 block">Qaytarish sababi</label>
+        <textarea
+          value={reason} onChange={(e) => setReason(e.target.value)}
+          placeholder="Masalan: mahsulot nuqsonli..."
+          rows={2}
+          className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-purple-400 resize-none"
+        />
+      </div>
+
+      {totalRefund > 0 && (
+        <div className="bg-purple-50 border border-purple-200 rounded-xl p-3 flex justify-between items-center">
+          <span className="text-sm text-purple-700 font-medium">Qaytariladigan summa:</span>
+          <span className="text-lg font-bold text-purple-700">{fmt(totalRefund)}</span>
+        </div>
+      )}
+
+      <div className="flex gap-2 pt-1">
+        <Button variant="outline" className="flex-1" onClick={onClose}>Bekor</Button>
+        <Button
+          className="flex-1 !bg-purple-600 hover:!bg-purple-700"
+          isLoading={mutation.isPending}
+          disabled={selectedItems.length === 0}
+          onClick={() => {
+            if (selectedItems.length === 0) { toast.error("Kamida 1 ta mahsulot tanlang"); return; }
+            mutation.mutate();
+          }}
+        >
+          Qaytarishni yuborish
+        </Button>
+      </div>
+    </div>
   );
 }
 
 // ── Customer Form Modal ──────────────────────────────────────
-function CustomerFormModal({
-  customer,
-  onClose,
-}: {
-  customer?: Customer | null;
-  onClose: () => void;
-}) {
+function CustomerFormModal({ customer, onClose }: { customer?: Customer | null; onClose: () => void }) {
   const qc = useQueryClient();
   const [name, setName] = useState(customer?.name ?? "");
   const [phone, setPhone] = useState(customer?.phone ?? "");
@@ -103,14 +565,12 @@ function CustomerFormModal({
   return (
     <div className="space-y-4">
       <Input
-        label="To'liq ism *"
-        value={name}
+        label="To'liq ism *" value={name}
         onChange={(e) => setName(e.target.value.charAt(0).toUpperCase() + e.target.value.slice(1))}
         placeholder="Mijoz ismi"
       />
       <Input
-        label="Telefon raqami *"
-        value={phone}
+        label="Telefon raqami *" value={phone} type="tel"
         onChange={(e) => {
           let val = e.target.value.replace(/\D/g, "");
           if (val.length === 0) { setPhone("+998 "); return; }
@@ -126,15 +586,12 @@ function CustomerFormModal({
         }}
         onFocus={() => { if (!phone) setPhone("+998 "); }}
         placeholder="+998 90 123 45 67"
-        type="tel"
       />
       <div className="space-y-1.5">
         <label className="text-sm font-medium text-gray-700">Izoh</label>
         <textarea
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          placeholder="Qo'shimcha ma'lumot..."
-          rows={3}
+          value={notes} onChange={(e) => setNotes(e.target.value)}
+          placeholder="Qo'shimcha ma'lumot..." rows={3}
           className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
         />
       </div>
@@ -153,11 +610,7 @@ function CustomerFormModal({
 }
 
 // ── Pay Debt Modal ───────────────────────────────────────────
-function PayDebtModal({ debtId, remaining, onClose }: {
-  debtId: string;
-  remaining: number;
-  onClose: () => void;
-}) {
+function PayDebtModal({ debtId, remaining, onClose }: { debtId: string; remaining: number; onClose: () => void }) {
   const qc = useQueryClient();
   const [amount, setAmount] = useState(String(remaining));
   const [method, setMethod] = useState<"CASH" | "CARD">("CASH");
@@ -173,24 +626,17 @@ function PayDebtModal({ debtId, remaining, onClose }: {
       const res = await api.get(`/debts/${id}/receipt`, { responseType: "blob" });
       const url = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
       setReceiptUrl(url);
-    } catch {
-      toast.error("Chek yuklanmadi");
-    } finally {
-      setLoadingReceipt(false);
-    }
+    } catch { toast.error("Chek yuklanmadi"); }
+    finally { setLoadingReceipt(false); }
   };
 
   const mutation = useMutation({
-    mutationFn: () =>
-      api.post(`/debts/${debtId}/payment`, {
-        amount: Number(amount),
-        paymentMethod: method,
-        notes: note || undefined,
-      }),
+    mutationFn: () => api.post(`/debts/${debtId}/payment`, { amount: Number(amount), paymentMethod: method, notes: note || undefined }),
     onSuccess: () => {
       toast.success("To'lov amalga oshirildi!");
       qc.invalidateQueries({ queryKey: ["customers"] });
       qc.invalidateQueries({ queryKey: ["customer-sales"] });
+      qc.invalidateQueries({ queryKey: ["customer-sales-debts"] });
       qc.invalidateQueries({ queryKey: ["customer-stats"] });
       setPaidAmount(Number(amount));
       setPaid(true);
@@ -199,7 +645,6 @@ function PayDebtModal({ debtId, remaining, onClose }: {
     onError: () => toast.error("Xatolik yuz berdi"),
   });
 
-  // ── To'lovdan keyin: chek ko'rinishi ──
   if (paid) {
     return (
       <div className="space-y-3">
@@ -209,7 +654,7 @@ function PayDebtModal({ debtId, remaining, onClose }: {
           </div>
           <div>
             <p className="font-semibold text-emerald-800 text-sm">To'lov muvaffaqiyatli!</p>
-            <p className="text-xs text-emerald-600">${paidAmount.toLocaleString('uz-UZ')} to'landi</p>
+            <p className="text-xs text-emerald-600">${paidAmount.toLocaleString("uz-UZ")} to'landi</p>
           </div>
         </div>
         {loadingReceipt ? (
@@ -222,15 +667,12 @@ function PayDebtModal({ debtId, remaining, onClose }: {
               <iframe src={receiptUrl} className="w-full h-full" title="Qarz to'lov cheki" />
             </div>
             <div className="flex gap-2">
-              <button
-                onClick={() => { const f = document.querySelector("iframe") as HTMLIFrameElement; f?.contentWindow?.print(); }}
-                className="flex-1 bg-indigo-600 text-white py-2.5 rounded-xl font-semibold text-sm"
-              >Print</button>
-              <a
-                href={receiptUrl}
-                download={`qarz-chek-${debtId.slice(0,8)}.pdf`}
-                className="flex-1 bg-gray-100 text-gray-700 text-center py-2.5 rounded-xl font-semibold text-sm flex items-center justify-center"
-              >PDF yuklash</a>
+              <button onClick={() => { const f = document.querySelector("iframe") as HTMLIFrameElement; f?.contentWindow?.print(); }}
+                className="flex-1 bg-indigo-600 text-white py-2.5 rounded-xl font-semibold text-sm">Print</button>
+              <a href={receiptUrl} download={`qarz-chek-${debtId.slice(0, 8)}.pdf`}
+                className="flex-1 bg-gray-100 text-gray-700 text-center py-2.5 rounded-xl font-semibold text-sm flex items-center justify-center">
+                PDF yuklash
+              </a>
             </div>
           </>
         ) : null}
@@ -241,7 +683,6 @@ function PayDebtModal({ debtId, remaining, onClose }: {
     );
   }
 
-  // ── To'lov formasi ──
   return (
     <div className="space-y-4">
       <div className="bg-red-50 border border-red-100 rounded-xl p-4">
@@ -253,11 +694,8 @@ function PayDebtModal({ debtId, remaining, onClose }: {
       </div>
       <div>
         <label className="text-xs font-semibold text-gray-600 mb-1.5 block">To'lov summasi</label>
-        <input
-          type="number" value={amount} onChange={(e) => setAmount(e.target.value)}
-          max={remaining} min={1}
-          className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-indigo-400 font-semibold text-lg"
-        />
+        <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} max={remaining} min={1}
+          className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-indigo-400 font-semibold text-lg" />
       </div>
       <div>
         <label className="text-xs font-semibold text-gray-600 mb-1.5 block">To'lov usuli</label>
@@ -273,44 +711,31 @@ function PayDebtModal({ debtId, remaining, onClose }: {
       <Input label="Izoh (ixtiyoriy)" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Izoh..." />
       <div className="flex gap-2 pt-1">
         <Button variant="outline" className="flex-1" onClick={onClose}>Bekor</Button>
-        <Button className="flex-1" isLoading={mutation.isPending}
-          onClick={() => {
-            if (!amount || Number(amount) <= 0) { toast.error("Summa kiriting"); return; }
-            if (Number(amount) > remaining) { toast.error("Summa qarzdan oshib ketdi"); return; }
-            mutation.mutate();
-          }}>
-          To'lash
-        </Button>
+        <Button className="flex-1" isLoading={mutation.isPending} onClick={() => {
+          if (!amount || Number(amount) <= 0) { toast.error("Summa kiriting"); return; }
+          if (Number(amount) > remaining) { toast.error("Summa qarzdan oshib ketdi"); return; }
+          mutation.mutate();
+        }}>To'lash</Button>
       </div>
     </div>
   );
 }
 
 // ── Sale Receipt Modal ───────────────────────────────────────
-// BUG FIX: useState(() => async) → useEffect ishlatildi
-function SaleReceiptModal({ saleId, saleNumber }: {
-  saleId: string;
-  saleNumber: string;
-  onClose: () => void;
-}) {
+function SaleReceiptModal({ saleId, saleNumber }: { saleId: string; saleNumber: string; onClose: () => void }) {
   const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let objectUrl: string | null = null;
-    api
-      .get(`/sales/${saleId}/receipt`, { responseType: "blob" })
+    api.get(`/sales/${saleId}/receipt`, { responseType: "blob" })
       .then((res) => {
         objectUrl = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
         setReceiptUrl(objectUrl);
       })
       .catch(() => toast.error("Chek yuklanmadi"))
       .finally(() => setLoading(false));
-
-    // Cleanup: memory leak oldini olish
-    return () => {
-      if (objectUrl) window.URL.revokeObjectURL(objectUrl);
-    };
+    return () => { if (objectUrl) window.URL.revokeObjectURL(objectUrl); };
   }, [saleId]);
 
   return (
@@ -325,17 +750,10 @@ function SaleReceiptModal({ saleId, saleNumber }: {
             <iframe src={receiptUrl} className="w-full h-full" title={`Chek #${saleNumber}`} />
           </div>
           <div className="flex gap-2">
-            <button
-              onClick={() => { const iframe = document.querySelector("iframe") as HTMLIFrameElement; iframe?.contentWindow?.print(); }}
-              className="flex-1 bg-indigo-600 text-white py-2.5 rounded-xl font-semibold text-sm"
-            >
-              Print
-            </button>
-            <a
-              href={receiptUrl}
-              download={`chek-${saleNumber}.pdf`}
-              className="flex-1 bg-gray-100 text-gray-700 text-center py-2.5 rounded-xl font-semibold text-sm flex items-center justify-center"
-            >
+            <button onClick={() => { const iframe = document.querySelector("iframe") as HTMLIFrameElement; iframe?.contentWindow?.print(); }}
+              className="flex-1 bg-indigo-600 text-white py-2.5 rounded-xl font-semibold text-sm">Print</button>
+            <a href={receiptUrl} download={`chek-${saleNumber}.pdf`}
+              className="flex-1 bg-gray-100 text-gray-700 text-center py-2.5 rounded-xl font-semibold text-sm flex items-center justify-center">
               PDF yuklash
             </a>
           </div>
@@ -348,63 +766,56 @@ function SaleReceiptModal({ saleId, saleNumber }: {
 }
 
 // ── Sale Card ────────────────────────────────────────────────
-function SaleCard({ sale, onPayDebt, onViewReceipt }: {
+function SaleCard({ sale, onPayDebt, onViewReceipt, onReturn }: {
   sale: Sale;
   onPayDebt: (debtId: string, remaining: number) => void;
   onViewReceipt: (saleId: string, saleNumber: string) => void;
+  onReturn: (sale: Sale) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const hasDebt = sale.debt && sale.debt.remainingAmount > 0;
   const isDebtSale = sale.payments?.some(p => p.method === "DEBT");
+  const hasReturns = sale.returns && sale.returns.length > 0;
+  const isReturned = sale.status === "RETURNED";
 
   return (
     <div className={`rounded-xl overflow-hidden border-2 transition-all ${
-      hasDebt
-        ? "border-red-200 bg-red-50/30"
-        : isDebtSale && sale.debt?.status === "PAID"
-        ? "border-emerald-200 bg-emerald-50/20"
-        : "border-gray-100 bg-white"
+      hasDebt ? "border-red-200 bg-red-50/30"
+      : isDebtSale && sale.debt?.status === "PAID" ? "border-emerald-200 bg-emerald-50/20"
+      : isReturned ? "border-purple-200 bg-purple-50/20"
+      : "border-gray-100 bg-white"
     }`}>
-      <div
-        className="flex items-center gap-3 px-4 py-3 cursor-pointer"
-        onClick={() => setExpanded(!expanded)}
-      >
+      <div className="flex items-center gap-3 px-4 py-3 cursor-pointer" onClick={() => setExpanded(!expanded)}>
         <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
-          hasDebt ? "bg-red-100" : "bg-indigo-50"
+          hasDebt ? "bg-red-100" : isReturned ? "bg-purple-100" : "bg-indigo-50"
         }`}>
-          <ShoppingBag size={16} className={hasDebt ? "text-red-500" : "text-indigo-500"} />
+          {isReturned
+            ? <RotateCcw size={16} className="text-purple-500" />
+            : <ShoppingBag size={16} className={hasDebt ? "text-red-500" : "text-indigo-500"} />}
         </div>
-
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <p className="font-semibold text-gray-900 text-sm">#{sale.saleNumber}</p>
-            {hasDebt && (
-              <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded-md font-semibold">Nasiya</span>
-            )}
-            {isDebtSale && sale.debt?.status === "PAID" && (
-              <span className="text-xs bg-emerald-100 text-emerald-600 px-1.5 py-0.5 rounded-md font-semibold">To'landi</span>
-            )}
+            {hasDebt && <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded-md font-semibold">Nasiya</span>}
+            {isDebtSale && sale.debt?.status === "PAID" && <span className="text-xs bg-emerald-100 text-emerald-600 px-1.5 py-0.5 rounded-md font-semibold">To'landi</span>}
+            {isReturned && <span className="text-xs bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded-md font-semibold">Qaytarildi</span>}
+            {hasReturns && !isReturned && <span className="text-xs bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded-md font-semibold">Qisman qaytarildi</span>}
           </div>
-          <p className="text-xs text-gray-400">
-            {sale.completedAt ? format(parseISO(sale.completedAt), "HH:mm") : "—"}
-          </p>
+          <p className="text-xs text-gray-400">{sale.completedAt ? format(parseISO(sale.completedAt), "HH:mm") : "—"}</p>
         </div>
-
         <div className="text-right flex-shrink-0">
           <p className="font-bold text-sm text-gray-900">{fmt(sale.grandTotal)}</p>
-          {hasDebt && (
-            <p className="text-xs text-red-500 font-semibold">{fmt(sale.debt!.remainingAmount)} qarz</p>
-          )}
+          {hasDebt && <p className="text-xs text-red-500 font-semibold">{fmt(sale.debt!.remainingAmount)} qarz</p>}
         </div>
-
         {expanded ? <ChevronUp size={15} className="text-gray-300 flex-shrink-0" /> : <ChevronDown size={15} className="text-gray-300 flex-shrink-0" />}
       </div>
 
       {expanded && (
         <div className="border-t border-gray-100 px-4 py-3 space-y-3 bg-white/80">
+          {/* Mahsulotlar */}
           <div className="space-y-1.5">
             {sale.items.map((item: any) => (
-              <div key={item.id} className="flex items-center justify-between text-sm">
+              <div key={item.id} className="flex items-center justify-between">
                 <div className="flex items-center gap-2 min-w-0">
                   <Package size={12} className="text-gray-300 flex-shrink-0" />
                   <span className="text-gray-700 truncate text-xs">{item.productNameSnapshot}</span>
@@ -415,6 +826,7 @@ function SaleCard({ sale, onPayDebt, onViewReceipt }: {
             ))}
           </div>
 
+          {/* To'lovlar */}
           <div className="flex gap-1.5 flex-wrap">
             {sale.payments.map((p: any) => (
               <span key={p.id} className={`text-xs px-2.5 py-1 rounded-lg font-semibold flex items-center gap-1 ${
@@ -428,25 +840,62 @@ function SaleCard({ sale, onPayDebt, onViewReceipt }: {
             ))}
           </div>
 
+          {/* Qarz to'lash */}
           {sale.debt && (sale.debt.status === "PENDING" || sale.debt.status === "PARTIALLY_PAID") && (
             <div className="bg-red-50 border border-red-100 rounded-xl p-3 flex items-center justify-between">
               <div>
                 <p className="text-xs font-semibold text-red-700">Qarz: {fmt(sale.debt.remainingAmount)}</p>
                 <StatusBadge status={sale.debt.status} />
               </div>
-              <button
-                onClick={() => onPayDebt(sale.debt!.id, sale.debt!.remainingAmount)}
-                className="bg-emerald-600 text-white text-xs px-3 py-2 rounded-lg font-semibold hover:bg-emerald-700 transition-colors"
-              >
+              <button onClick={() => onPayDebt(sale.debt!.id, sale.debt!.remainingAmount)}
+                className="bg-emerald-600 text-white text-xs px-3 py-2 rounded-lg font-semibold hover:bg-emerald-700 transition-colors">
                 To'lash
               </button>
             </div>
           )}
 
-          <button
-            onClick={() => onViewReceipt(sale.id, sale.saleNumber)}
-            className="w-full flex items-center justify-center gap-2 text-xs text-indigo-600 font-semibold py-2 rounded-lg hover:bg-indigo-50 transition-colors border border-indigo-100"
-          >
+          {/* Qaytarishlar ro'yxati */}
+          {hasReturns && (
+            <div className="space-y-1.5">
+              {sale.returns!.map((ret) => (
+                <div key={ret.id} className={`rounded-lg px-3 py-2 flex items-center justify-between text-xs ${
+                  ret.status === "APPROVED" ? "bg-purple-50 border border-purple-100"
+                  : ret.status === "PENDING" ? "bg-amber-50 border border-amber-100"
+                  : "bg-gray-50 border border-gray-100"
+                }`}>
+                  <div className="flex items-center gap-1.5">
+                    <RotateCcw size={11} className={
+                      ret.status === "APPROVED" ? "text-purple-500"
+                      : ret.status === "PENDING" ? "text-amber-500" : "text-gray-400"
+                    } />
+                    <span className="font-semibold text-gray-700">#{ret.returnNumber}</span>
+                    <span className={`px-1.5 py-0.5 rounded-full font-semibold ${
+                      ret.status === "APPROVED" ? "bg-purple-100 text-purple-700"
+                      : ret.status === "PENDING" ? "bg-amber-100 text-amber-700"
+                      : "bg-gray-100 text-gray-500"
+                    }`}>
+                      {ret.status === "APPROVED" ? "Tasdiqlandi" : ret.status === "PENDING" ? "Kutilmoqda" : "Rad etildi"}
+                    </span>
+                  </div>
+                  <span className={`font-bold ${ret.status === "APPROVED" ? "text-purple-700" : "text-gray-500"}`}>
+                    -{fmt(ret.refundAmount)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Qaytarish tugmasi — faqat COMPLETED savdolarda */}
+          {sale.status === "COMPLETED" && (
+            <button onClick={() => onReturn(sale)}
+              className="w-full flex items-center justify-center gap-2 text-xs text-purple-600 font-semibold py-2 rounded-lg hover:bg-purple-50 transition-colors border border-purple-100">
+              <RotateCcw size={13} /> Qaytarish
+            </button>
+          )}
+
+          {/* Chek ko'rish */}
+          <button onClick={() => onViewReceipt(sale.id, sale.saleNumber)}
+            className="w-full flex items-center justify-center gap-2 text-xs text-indigo-600 font-semibold py-2 rounded-lg hover:bg-indigo-50 transition-colors border border-indigo-100">
             <FileText size={13} /> Chekni ko'rish
           </button>
         </div>
@@ -457,14 +906,13 @@ function SaleCard({ sale, onPayDebt, onViewReceipt }: {
 
 // ── Customer Detail ──────────────────────────────────────────
 function CustomerDetail({ customer, onBack, onEdit, onDelete }: {
-  customer: Customer;
-  onBack: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
+  customer: Customer; onBack: () => void; onEdit: () => void; onDelete: () => void;
 }) {
   const [tab, setTab] = useState<"sales" | "stats">("sales");
   const [payingDebt, setPayingDebt] = useState<{ id: string; remaining: number } | null>(null);
   const [viewingReceipt, setViewingReceipt] = useState<{ id: string; number: string } | null>(null);
+  const [returningItem, setReturningItem] = useState<Sale | null>(null);
+  const [showDebtList, setShowDebtList] = useState(false);
   const [salesPage, setSalesPage] = useState(1);
 
   const { data: salesData, isLoading: salesLoading } = useQuery({
@@ -483,16 +931,13 @@ function CustomerDetail({ customer, onBack, onEdit, onDelete }: {
 
   return (
     <div className="space-y-4">
-      {/* Header */}
       <div className="flex items-center gap-3">
         <button onClick={onBack} className="p-2 hover:bg-gray-100 rounded-xl transition-colors">
           <ArrowLeft size={20} className="text-gray-600" />
         </button>
         <div className="flex-1 min-w-0">
           <h2 className="font-bold text-gray-900 text-lg truncate">{customer.name}</h2>
-          <p className="text-sm text-gray-500 flex items-center gap-1">
-            <Phone size={12} />{customer.phone}
-          </p>
+          <p className="text-sm text-gray-500 flex items-center gap-1"><Phone size={12} />{customer.phone}</p>
         </div>
         <button onClick={onEdit} className="p-2 hover:bg-gray-100 rounded-xl transition-colors">
           <Edit2 size={18} className="text-gray-500" />
@@ -502,7 +947,6 @@ function CustomerDetail({ customer, onBack, onEdit, onDelete }: {
         </button>
       </div>
 
-      {/* Stats cards */}
       {stats && (
         <div className="grid grid-cols-3 gap-2">
           <div className="bg-indigo-50 rounded-xl p-3 text-center">
@@ -513,10 +957,21 @@ function CustomerDetail({ customer, onBack, onEdit, onDelete }: {
             <p className="text-xs text-emerald-400 font-medium">Jami</p>
             <p className="font-bold text-emerald-800 text-sm">{fmt(stats.totalAmount)}</p>
           </div>
-          <div className={`rounded-xl p-3 text-center ${stats.totalDebt > 0 ? "bg-red-50" : "bg-gray-50"}`}>
+          {/* Qarz kartasi — bosish mumkin */}
+          <button
+            onClick={() => stats.totalDebt > 0 && setShowDebtList(true)}
+            className={`rounded-xl p-3 text-center transition-all ${
+              stats.totalDebt > 0
+                ? "bg-red-50 hover:bg-red-100 hover:shadow-sm cursor-pointer active:scale-95"
+                : "bg-gray-50 cursor-default"
+            }`}
+          >
             <p className={`text-xs font-medium ${stats.totalDebt > 0 ? "text-red-400" : "text-gray-400"}`}>Qarz</p>
             <p className={`font-bold text-sm ${stats.totalDebt > 0 ? "text-red-700" : "text-gray-500"}`}>{fmt(stats.totalDebt)}</p>
-          </div>
+            {stats.totalDebt > 0 && (
+              <p className="text-xs text-red-400 mt-0.5">ko'rish →</p>
+            )}
+          </button>
         </div>
       )}
 
@@ -526,25 +981,20 @@ function CustomerDetail({ customer, onBack, onEdit, onDelete }: {
         </div>
       )}
 
-      {/* Tabs */}
       <div className="flex gap-2 bg-gray-100 rounded-xl p-1">
         {[
           { k: "sales", label: "Savdolar", icon: ShoppingBag },
           { k: "stats", label: "Statistika", icon: BarChart2 },
         ].map(({ k, label, icon: Icon }) => (
-          <button
-            key={k}
-            onClick={() => setTab(k as any)}
+          <button key={k} onClick={() => setTab(k as any)}
             className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all flex items-center justify-center gap-1.5 ${
               tab === k ? "bg-white text-indigo-600 shadow-sm" : "text-gray-500 hover:text-gray-700"
-            }`}
-          >
+            }`}>
             <Icon size={14} />{label}
           </button>
         ))}
       </div>
 
-      {/* SALES TAB */}
       {tab === "sales" && (
         <div className="space-y-4">
           {salesLoading ? (
@@ -569,25 +1019,20 @@ function CustomerDetail({ customer, onBack, onEdit, onDelete }: {
                   <div className="space-y-2">
                     {group.sales.map((sale) => (
                       <SaleCard
-                        key={sale.id}
-                        sale={sale}
+                        key={sale.id} sale={sale}
                         onPayDebt={(id, remaining) => setPayingDebt({ id, remaining })}
                         onViewReceipt={(id, number) => setViewingReceipt({ id, number })}
+                        onReturn={(s) => setReturningItem(s)}
                       />
                     ))}
                   </div>
                 </div>
               ))}
-
               {(salesData?.total ?? 0) > 20 && (
                 <div className="flex items-center justify-between pt-2">
-                  <Button variant="outline" size="sm" onClick={() => setSalesPage((p) => Math.max(1, p - 1))} disabled={salesPage === 1}>
-                    Oldingi
-                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => setSalesPage((p) => Math.max(1, p - 1))} disabled={salesPage === 1}>Oldingi</Button>
                   <span className="text-sm text-gray-500">{salesPage} / {Math.ceil((salesData?.total ?? 0) / 20)}</span>
-                  <Button variant="outline" size="sm" onClick={() => setSalesPage((p) => p + 1)} disabled={salesPage >= Math.ceil((salesData?.total ?? 0) / 20)}>
-                    Keyingi
-                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => setSalesPage((p) => p + 1)} disabled={salesPage >= Math.ceil((salesData?.total ?? 0) / 20)}>Keyingi</Button>
                 </div>
               )}
             </>
@@ -595,7 +1040,6 @@ function CustomerDetail({ customer, onBack, onEdit, onDelete }: {
         </div>
       )}
 
-      {/* STATS TAB */}
       {tab === "stats" && (
         <div className="space-y-3">
           {statsLoading ? (
@@ -614,7 +1058,6 @@ function CustomerDetail({ customer, onBack, onEdit, onDelete }: {
                   <p className="font-bold text-gray-900">{format(parseISO(customer.createdAt), "dd.MM.yyyy")}</p>
                 </div>
               </div>
-
               <div className="bg-white border border-gray-100 rounded-xl p-4">
                 <p className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
                   <TrendingUp size={16} className="text-indigo-500" /> Oylik statistika
@@ -633,10 +1076,8 @@ function CustomerDetail({ customer, onBack, onEdit, onDelete }: {
                           <div key={key} className="flex items-center gap-3">
                             <span className="text-xs text-gray-500 w-16 flex-shrink-0">{monthName} {year}</span>
                             <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
-                              <div
-                                className="bg-indigo-500 h-full rounded-full transition-all"
-                                style={{ width: `${Math.min(100, (val.amount / (stats.totalAmount || 1)) * 100 * 3)}%` }}
-                              />
+                              <div className="bg-indigo-500 h-full rounded-full transition-all"
+                                style={{ width: `${Math.min(100, (val.amount / (stats.totalAmount || 1)) * 100 * 3)}%` }} />
                             </div>
                             <span className="text-xs font-semibold text-gray-700 w-20 text-right flex-shrink-0">{fmt(val.amount)}</span>
                             <span className="text-xs text-gray-400 w-8 flex-shrink-0">{val.count}ta</span>
@@ -651,18 +1092,30 @@ function CustomerDetail({ customer, onBack, onEdit, onDelete }: {
         </div>
       )}
 
+      {/* Debt List Modal */}
+      <Modal isOpen={showDebtList} onClose={() => setShowDebtList(false)} title="Faol qarzlar" size="sm">
+        <DebtListModal
+          customerId={customer.id}
+          customerName={customer.name}
+          customerPhone={customer.phone}
+          onClose={() => setShowDebtList(false)}
+          onPayDebt={(id, remaining) => { setShowDebtList(false); setPayingDebt({ id, remaining }); }}
+        />
+      </Modal>
+
       {/* Pay Debt Modal */}
       <Modal isOpen={!!payingDebt} onClose={() => setPayingDebt(null)} title="Qarz to'lovi" size="sm">
-        {payingDebt && (
-          <PayDebtModal debtId={payingDebt.id} remaining={payingDebt.remaining} onClose={() => setPayingDebt(null)} />
-        )}
+        {payingDebt && <PayDebtModal debtId={payingDebt.id} remaining={payingDebt.remaining} onClose={() => setPayingDebt(null)} />}
       </Modal>
 
       {/* Receipt Modal */}
       <Modal isOpen={!!viewingReceipt} onClose={() => setViewingReceipt(null)} title={`Chek #${viewingReceipt?.number}`} size="md">
-        {viewingReceipt && (
-          <SaleReceiptModal saleId={viewingReceipt.id} saleNumber={viewingReceipt.number} onClose={() => setViewingReceipt(null)} />
-        )}
+        {viewingReceipt && <SaleReceiptModal saleId={viewingReceipt.id} saleNumber={viewingReceipt.number} onClose={() => setViewingReceipt(null)} />}
+      </Modal>
+
+      {/* Return Modal */}
+      <Modal isOpen={!!returningItem} onClose={() => setReturningItem(null)} title={"Qaytarish — #" + (returningItem?.saleNumber ?? "")} size="md">
+        {returningItem && <ReturnModal sale={returningItem} onClose={() => setReturningItem(null)} />}
       </Modal>
     </div>
   );
@@ -690,15 +1143,8 @@ export function CustomersPage() {
     return list;
   }, [customers, filter]);
 
-  const totalDebt = useMemo(
-    () => customers.reduce((s: number, c: any) => s + (c.totalDebt ?? 0), 0),
-    [customers]
-  );
-
-  const debtorCount = useMemo(
-    () => customers.filter((c: any) => (c.totalDebt ?? 0) > 0).length,
-    [customers]
-  );
+  const totalDebt = useMemo(() => customers.reduce((s: number, c: any) => s + (c.totalDebt ?? 0), 0), [customers]);
+  const debtorCount = useMemo(() => customers.filter((c: any) => (c.totalDebt ?? 0) > 0).length, [customers]);
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => customersApi.remove(id),
@@ -715,21 +1161,14 @@ export function CustomersPage() {
     return (
       <div className="space-y-4">
         <CustomerDetail
-          customer={selected}
-          onBack={() => setSelected(null)}
+          customer={selected} onBack={() => setSelected(null)}
           onEdit={() => { setEditTarget(selected); setShowForm(true); }}
           onDelete={() => setDeleteTarget(selected)}
         />
-        <Modal
-          isOpen={showForm && !!editTarget}
-          onClose={() => { setShowForm(false); setEditTarget(null); }}
-          title="Mijozni tahrirlash"
-          size="sm"
-        >
+        <Modal isOpen={showForm && !!editTarget} onClose={() => { setShowForm(false); setEditTarget(null); }} title="Mijozni tahrirlash" size="sm">
           {editTarget && (
             <CustomerFormModal customer={editTarget} onClose={() => {
-              setShowForm(false);
-              setEditTarget(null);
+              setShowForm(false); setEditTarget(null);
               qc.invalidateQueries({ queryKey: ["customers"] }).then(() => {
                 customersApi.getOne(selected.id).then(setSelected).catch(() => {});
               });
@@ -744,9 +1183,7 @@ export function CustomersPage() {
             <div className="flex gap-2">
               <Button variant="outline" className="flex-1" onClick={() => setDeleteTarget(null)}>Bekor</Button>
               <Button variant="danger" className="flex-1" isLoading={deleteMutation.isPending}
-                onClick={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}>
-                O'chirish
-              </Button>
+                onClick={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}>O'chirish</Button>
             </div>
           </div>
         </Modal>
@@ -756,70 +1193,45 @@ export function CustomersPage() {
 
   return (
     <div className="space-y-4">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Mijozlar</h1>
           <p className="text-gray-500 text-sm">{customers.length} ta mijoz · {debtorCount} ta qarzdor</p>
         </div>
-        <Button size="sm" leftIcon={<Plus size={15} />} onClick={() => { setEditTarget(null); setShowForm(true); }}>
-          Yangi
-        </Button>
+        <Button size="sm" leftIcon={<Plus size={15} />} onClick={() => { setEditTarget(null); setShowForm(true); }}>Yangi</Button>
       </div>
 
-      {/* Stats */}
       <div className="grid grid-cols-3 gap-3">
         <div className="bg-white rounded-xl border border-gray-100 p-3 text-center">
-          <div className="flex items-center justify-center mb-1">
-            <Users size={14} className="text-indigo-400" />
-          </div>
+          <div className="flex items-center justify-center mb-1"><Users size={14} className="text-indigo-400" /></div>
           <p className="text-xs text-gray-400">Jami mijozlar</p>
           <p className="font-bold text-gray-900 text-lg">{customers.length}</p>
         </div>
         <div className="bg-white rounded-xl border border-gray-100 p-3 text-center">
-          <div className="flex items-center justify-center mb-1">
-            <AlertTriangle size={14} className="text-red-400" />
-          </div>
+          <div className="flex items-center justify-center mb-1"><AlertTriangle size={14} className="text-red-400" /></div>
           <p className="text-xs text-gray-400">Qarzdorlar</p>
           <p className="font-bold text-red-600 text-lg">{debtorCount}</p>
         </div>
         <div className="bg-white rounded-xl border border-gray-100 p-3 text-center">
-          <div className="flex items-center justify-center mb-1">
-            <DollarSign size={14} className="text-red-400" />
-          </div>
+          <div className="flex items-center justify-center mb-1"><DollarSign size={14} className="text-red-400" /></div>
           <p className="text-xs text-gray-400">Jami qarz</p>
           <p className="font-bold text-red-600 text-sm">{fmt(totalDebt)}</p>
         </div>
       </div>
 
-      {/* Search + Filter */}
       <div className="space-y-2">
-        <Input
-          placeholder="Ism yoki telefon bo'yicha qidirish..."
-          icon={<Search size={16} />}
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+        <Input placeholder="Ism yoki telefon bo'yicha qidirish..." icon={<Search size={16} />}
+          value={search} onChange={(e) => setSearch(e.target.value)} />
         <div className="flex gap-1.5">
-          {[
-            { k: "all", l: "Barchasi" },
-            { k: "debt", l: "Qarzdorlar" },
-            { k: "paid", l: "To'langan" },
-          ].map(({ k, l }) => (
-            <button
-              key={k}
-              onClick={() => setFilter(k as any)}
+          {[{ k: "all", l: "Barchasi" }, { k: "debt", l: "Qarzdorlar" }, { k: "paid", l: "To'langan" }].map(({ k, l }) => (
+            <button key={k} onClick={() => setFilter(k as any)}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
                 filter === k ? "bg-indigo-600 text-white" : "bg-white border border-gray-200 text-gray-600 hover:border-indigo-300"
-              }`}
-            >
-              {l}
-            </button>
+              }`}>{l}</button>
           ))}
         </div>
       </div>
 
-      {/* List */}
       {isLoading ? (
         <div className="flex items-center justify-center h-40">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" />
@@ -837,30 +1249,22 @@ export function CustomersPage() {
           {filtered.map((c: any) => {
             const debt = c.totalDebt ?? 0;
             return (
-              <div
-                key={c.id}
-                onClick={() => setSelected(c)}
+              <div key={c.id} onClick={() => setSelected(c)}
                 className={`rounded-xl border px-4 py-3 flex items-center gap-3 cursor-pointer transition-all ${
                   debt > 0
                     ? "bg-red-50/50 border-red-200 hover:border-red-300 hover:shadow-sm"
                     : "bg-white border-gray-100 hover:border-indigo-300 hover:shadow-sm"
-                }`}
-              >
+                }`}>
                 <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${debt > 0 ? "bg-red-100" : "bg-indigo-50"}`}>
                   <User size={18} className={debt > 0 ? "text-red-500" : "text-indigo-500"} />
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold text-gray-900 text-sm truncate">{c.name}</p>
-                  <p className="text-xs text-gray-400 flex items-center gap-1">
-                    <Phone size={10} />{c.phone}
-                  </p>
+                  <p className="text-xs text-gray-400 flex items-center gap-1"><Phone size={10} />{c.phone}</p>
                 </div>
                 <div className="text-right flex-shrink-0">
                   {debt > 0 ? (
-                    <>
-                      <p className="font-bold text-red-600 text-sm">{fmt(debt)}</p>
-                      <p className="text-xs text-red-400">qarz</p>
-                    </>
+                    <><p className="font-bold text-red-600 text-sm">{fmt(debt)}</p><p className="text-xs text-red-400">qarz</p></>
                   ) : (
                     <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-semibold">To'langan</span>
                   )}
@@ -872,13 +1276,8 @@ export function CustomersPage() {
         </div>
       )}
 
-      {/* Add/Edit Modal */}
-      <Modal
-        isOpen={showForm}
-        onClose={() => { setShowForm(false); setEditTarget(null); }}
-        title={editTarget ? "Mijozni tahrirlash" : "Yangi mijoz"}
-        size="sm"
-      >
+      <Modal isOpen={showForm} onClose={() => { setShowForm(false); setEditTarget(null); }}
+        title={editTarget ? "Mijozni tahrirlash" : "Yangi mijoz"} size="sm">
         <CustomerFormModal customer={editTarget} onClose={() => { setShowForm(false); setEditTarget(null); }} />
       </Modal>
     </div>
