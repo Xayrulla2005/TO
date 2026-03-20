@@ -24,6 +24,18 @@ const UNIT_LABELS: Record<string, string> = {
   pack:  'paket',
 };
 
+/** Qoldiq miqdorini chiroyli ko'rsatish:
+ *  0 yoki manfiy → null (ko'rsatilmaydi)
+ *  Butun son     → "15"
+ *  Kasr son      → "17.5" (ortiqcha nolsiz)
+ */
+function formatStock(qty: number): string | null {
+  if (!qty || qty <= 0) return null;
+  // parseFloat ortiqcha nollarni olib tashlaydi: 17.5000 → 17.5, 9.0000 → 9
+  const clean = parseFloat(qty.toString());
+  return clean.toString();
+}
+
 export function ProductsPage() {
   const { user } = useAuthStore();
   const isAdmin = user?.role === 'ADMIN';
@@ -106,74 +118,87 @@ export function ProductsPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredProducts.map((product: Product) => (
-              <TableRow key={product.id}>
-                <TableCell>
-                  <div className="flex items-center gap-3">
-                    <div className="h-10 w-10 rounded-lg bg-gray-100 flex items-center justify-center overflow-hidden border border-gray-200">
-                      {product.imageUrl ? (
-                        <img src={product.imageUrl} alt={product.name} className="h-full w-full object-cover" />
-                      ) : (
-                        <Package size={20} className="text-gray-400" />
-                      )}
-                    </div>
-                    <span className="font-medium text-gray-900">{product.name}</span>
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <span className="inline-flex px-2 py-1 bg-gray-100 rounded-md text-xs font-medium text-gray-700">
-                    {product.category?.name || 'Kategoriyasiz'}
-                  </span>
-                </TableCell>
-                {/* ✅ O'lchov birligi badge */}
-                <TableCell>
-                  <span className="inline-flex px-2 py-1 bg-indigo-50 text-indigo-700 rounded-md text-xs font-semibold">
-                    {UNIT_LABELS[product.unit] || product.unit || 'dona'}
-                  </span>
-                </TableCell>
-                <TableCell className="text-gray-600">
-                  {formatCurrency(product.purchasePrice)}
-                </TableCell>
-                <TableCell className="font-medium text-indigo-600">
-                  {formatCurrency(product.salePrice)}
-                </TableCell>
-                <TableCell>
-                  <span className={
-                    product.stockQuantity <= (product.minStockLimit ?? 5)
-                      ? 'text-red-600 font-bold'
-                      : 'text-gray-700'
-                  }>
-                    {product.stockQuantity}{' '}
-                    <span className="text-gray-400 text-xs font-normal">
-                      {UNIT_LABELS[product.unit] || ''}
-                    </span>
-                  </span>
-                </TableCell>
-                <TableCell>
-                  <Badge variant={product.stockQuantity > 0 ? 'success' : 'danger'}>
-                    {product.stockQuantity > 0 ? 'Mavjud' : "Tugagan"}
-                  </Badge>
-                </TableCell>
-                {isAdmin && (
-                  <TableCell className="text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <button
-                        onClick={() => handleEdit(product)}
-                        className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-                      >
-                        <Edit size={18} />
-                      </button>
-                      <button
-                        onClick={() => setDeletingId(product.id)}
-                        className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                      >
-                        <Trash2 size={18} />
-                      </button>
+            {filteredProducts.map((product: Product) => {
+              const stockDisplay = formatStock(product.stockQuantity);
+              const unitLabel    = UNIT_LABELS[product.unit] || product.unit || '';
+              const isLow        = product.stockQuantity <= (product.minStockLimit ?? 5);
+
+              return (
+                <TableRow key={product.id}>
+                  <TableCell>
+                    <div className="flex items-center gap-3">
+                      <div className="h-10 w-10 rounded-lg bg-gray-100 flex items-center justify-center overflow-hidden border border-gray-200">
+                        {product.imageUrl ? (
+                          <img src={product.imageUrl} alt={product.name} className="h-full w-full object-cover" />
+                        ) : (
+                          <Package size={20} className="text-gray-400" />
+                        )}
+                      </div>
+                      <span className="font-medium text-gray-900">{product.name}</span>
                     </div>
                   </TableCell>
-                )}
-              </TableRow>
-            ))}
+
+                  <TableCell>
+                    <span className="inline-flex px-2 py-1 bg-gray-100 rounded-md text-xs font-medium text-gray-700">
+                      {product.category?.name || 'Kategoriyasiz'}
+                    </span>
+                  </TableCell>
+
+                  {/* O'lchov birligi */}
+                  <TableCell>
+                    <span className="inline-flex px-2 py-1 bg-indigo-50 text-indigo-700 rounded-md text-xs font-semibold">
+                      {unitLabel || 'dona'}
+                    </span>
+                  </TableCell>
+
+                  <TableCell className="text-gray-600">
+                    {formatCurrency(product.purchasePrice)}
+                  </TableCell>
+
+                  <TableCell className="font-medium text-indigo-600">
+                    {formatCurrency(product.salePrice)}
+                  </TableCell>
+
+                  {/* Qoldiq — 0 bo'lsa hech narsa ko'rsatilmaydi */}
+                  <TableCell>
+                    {stockDisplay ? (
+                      <span className={isLow ? 'text-red-600 font-bold' : 'text-gray-700'}>
+                        {stockDisplay}{' '}
+                        <span className="text-gray-400 text-xs font-normal">{unitLabel}</span>
+                      </span>
+                    ) : (
+                      <span className="text-gray-300 text-xs">—</span>
+                    )}
+                  </TableCell>
+
+                  <TableCell>
+                    <Badge variant={product.stockQuantity > 0 ? 'success' : 'danger'}>
+                      {product.stockQuantity > 0 ? 'Mavjud' : 'Tugagan'}
+                    </Badge>
+                  </TableCell>
+
+                  {isAdmin && (
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => handleEdit(product)}
+                          className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                        >
+                          <Edit size={18} />
+                        </button>
+                        <button
+                          onClick={() => setDeletingId(product.id)}
+                          className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                      </div>
+                    </TableCell>
+                  )}
+                </TableRow>
+              );
+            })}
+
             {filteredProducts.length === 0 && (
               <TableRow>
                 <TableCell colSpan={isAdmin ? 8 : 7} className="text-center py-8 text-gray-500">

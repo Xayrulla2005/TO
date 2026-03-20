@@ -19,10 +19,139 @@ import {
   Banknote, CreditCard, AlertCircle, BarChart2, ShoppingBag,
   Trash2, Package, ArrowLeft, FileText, TrendingUp,
   ChevronDown, ChevronUp, Users, AlertTriangle, DollarSign,
-  Calendar, RotateCcw, X,
+  Calendar, RotateCcw, Download, Share2, Printer,
 } from "lucide-react";
 
 const fmt = (v: number | string | null | undefined) => `$${formatCurrency(v)}`;
+
+// ══════════════════════════════════════════════════════════════
+// ── Universal PDF amallar (print / download / share) ──────────
+// ══════════════════════════════════════════════════════════════
+
+function triggerDownload(url: string, filename: string) {
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+function blobUrlToFile(blobUrl: string, filename: string): Promise<File> {
+  return fetch(blobUrl)
+    .then((r) => r.blob())
+    .then((blob) => new File([blob], filename, { type: "application/pdf" }));
+}
+
+
+/** 3 ta tugma: Chop etish · PDF yuklash · Ulashish
+ *  isPdfBlob=true  → asl PDF blob (backend dan kelgan)
+ *  isPdfBlob=false → HTML blob (frontend da generatsiya qilingan)
+ */
+function PdfActionButtons({
+  pdfUrl, filename, isPdfBlob = true,
+}: {
+  pdfUrl: string | null;
+  filename: string;
+  isPdfBlob?: boolean;
+}) {
+  const [sharing, setSharing] = useState(false);
+  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  if (!pdfUrl) return null;
+
+  // ── Chop etish ──────────────────────────────────────────────
+  const handlePrint = () => {
+    const win = window.open(pdfUrl, "_blank");
+    if (win) {
+      win.addEventListener("load", () => { win.focus(); win.print(); });
+    } else {
+      toast.error("Popup bloklangan — brauzer sozlamalarini tekshiring");
+    }
+  };
+
+  // ── Yuklash ─────────────────────────────────────────────────
+  // PDF blob → to'g'ridan-to'g'ri .pdf fayl
+  // HTML blob → chop etish oynasi + "Save as PDF" yo'riqnomasi
+  const handleDownload = () => {
+    if (isPdfBlob) {
+      triggerDownload(pdfUrl, filename);
+    } else {
+      // HTML ni yangi oynada ochamiz, foydalanuvchi Ctrl+P → Save as PDF qiladi
+      const win = window.open(pdfUrl, "_blank");
+      if (win) {
+        win.addEventListener("load", () => {
+          win.focus();
+          // Avtomatik print dialog (brauzer bloklamasa)
+          setTimeout(() => win.print(), 400);
+        });
+      } else {
+        // Popup bloklangan → HTML faylni yuklaymiz
+        triggerDownload(pdfUrl, filename.replace(".pdf", ".html"));
+        toast.success("HTML fayl yuklandi — brauzerda ochib Ctrl+P → Save as PDF");
+      }
+    }
+  };
+
+  // ── Ulashish ────────────────────────────────────────────────
+  const handleShare = async () => {
+    setSharing(true);
+    try {
+      if (isPdfBlob) {
+        // PDF faylni to'g'ridan-to'g'ri ulashish
+        const canShareFile =
+          typeof navigator.share === "function" &&
+          typeof navigator.canShare === "function" &&
+          navigator.canShare({ files: [new File([], "t.pdf", { type: "application/pdf" })] });
+
+        if (canShareFile) {
+          const file = await blobUrlToFile(pdfUrl, filename);
+          await navigator.share({ title: filename.replace(".pdf", ""), files: [file] });
+        } else if (typeof navigator.share === "function") {
+          await navigator.share({ title: filename.replace(".pdf", ""), url: window.location.href });
+        } else {
+          triggerDownload(pdfUrl, filename);
+          toast.success("PDF yuklandi — Telegram/WhatsApp orqali yuboring");
+        }
+      } else {
+        // HTML blob → chop etish oynasida PDF saqlab, keyin ulashish
+        // Yoki HTML faylni yuklab Telegram ga biriktirish
+        triggerDownload(pdfUrl, filename.replace(".pdf", ".html"));
+        toast.success("Fayl yuklandi — uni Telegram/WhatsApp ga yuboring");
+      }
+    } catch (err: any) {
+      if (err?.name !== "AbortError") {
+        triggerDownload(pdfUrl, isPdfBlob ? filename : filename.replace(".pdf", ".html"));
+        toast.success("Fayl yuklandi");
+      }
+    } finally {
+      setSharing(false);
+    }
+  };
+
+  return (
+    <div className="flex gap-2">
+      {!isMobile && (
+        <button onClick={handlePrint}
+          className="flex-1 flex items-center justify-center gap-1.5 bg-indigo-600 text-white py-2.5 rounded-xl font-semibold text-sm hover:bg-indigo-700 transition-colors">
+          <Printer size={15} /> Chop etish
+        </button>
+      )}
+      <button onClick={handleDownload}
+        className="flex-1 flex items-center justify-center gap-1.5 bg-gray-100 text-gray-700 py-2.5 rounded-xl font-semibold text-sm hover:bg-gray-200 transition-colors">
+        <Download size={15} /> {isPdfBlob ? "PDF yuklash" : "PDF yuklash"}
+      </button>
+      <button onClick={handleShare} disabled={sharing}
+        className="flex-1 flex items-center justify-center gap-1.5 bg-emerald-600 text-white py-2.5 rounded-xl font-semibold text-sm hover:bg-emerald-700 transition-colors disabled:opacity-60">
+        {sharing
+          ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+          : <Share2 size={15} />}
+        Ulashish
+      </button>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
 
 function groupSalesByDate(sales: Sale[]): { label: string; date: string; sales: Sale[] }[] {
   const groups = new Map<string, Sale[]>();
@@ -44,16 +173,16 @@ function groupSalesByDate(sales: Sale[]): { label: string; date: string; sales: 
 
 function StatusBadge({ status }: { status: string }) {
   const cfg: Record<string, { cls: string; label: string }> = {
-    PENDING:        { cls: "bg-red-100 text-red-700",     label: "To'lanmagan" },
-    PARTIALLY_PAID: { cls: "bg-amber-100 text-amber-700", label: "Qisman" },
-    PAID:           { cls: "bg-emerald-100 text-emerald-700", label: "To'langan" },
-    CANCELLED:      { cls: "bg-gray-100 text-gray-500",   label: "Bekor" },
+    PENDING:        { cls: "bg-red-100 text-red-700",          label: "To'lanmagan" },
+    PARTIALLY_PAID: { cls: "bg-amber-100 text-amber-700",      label: "Qisman" },
+    PAID:           { cls: "bg-emerald-100 text-emerald-700",  label: "To'langan" },
+    CANCELLED:      { cls: "bg-gray-100 text-gray-500",        label: "Bekor" },
   };
   const c = cfg[status] ?? { cls: "bg-gray-100 text-gray-500", label: status };
   return <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${c.cls}`}>{c.label}</span>;
 }
 
-// ── Debt List Modal — hisob-faktura ko'rinishida ──
+// ── Debt List Modal ───────────────────────────────────────────
 function DebtListModal({ customerId, customerName, customerPhone, onClose, onPayDebt }: {
   customerId: string;
   customerName: string;
@@ -61,9 +190,6 @@ function DebtListModal({ customerId, customerName, customerPhone, onClose, onPay
   onClose: () => void;
   onPayDebt: (debtId: string, remaining: number) => void;
 }) {
-  const [shareLoading, setShareLoading] = useState(false);
-  const printRef = useRef<HTMLDivElement>(null);
-
   const { data: salesData, isLoading } = useQuery({
     queryKey: ["customer-sales-debts", customerId],
     queryFn: () => customersApi.getSales(customerId, 1, 100),
@@ -74,84 +200,83 @@ function DebtListModal({ customerId, customerName, customerPhone, onClose, onPay
     return sales
       .filter(s => s.debt && (s.debt.status === "PENDING" || s.debt.status === "PARTIALLY_PAID"))
       .map(s => ({ sale: s, debt: s.debt! }))
-      .sort((a, b) => new Date(a.sale.completedAt || a.sale.createdAt).getTime()
-                    - new Date(b.sale.completedAt || b.sale.createdAt).getTime());
+      .sort((a, b) =>
+        new Date(a.sale.completedAt || a.sale.createdAt).getTime() -
+        new Date(b.sale.completedAt || b.sale.createdAt).getTime()
+      );
   }, [salesData]);
 
-  const totalRemaining = Math.round(activeDebts.reduce((s, { debt }) => s + Number(debt.remainingAmount), 0) * 100) / 100;
-  const totalDebtTaken = Math.round(activeDebts.reduce((s, { debt }) => s + Number(debt.originalAmount), 0) * 100) / 100;
-  const totalPaid      = Math.round((totalDebtTaken - totalRemaining) * 100) / 100;
+  const totalRemaining  = Math.round(activeDebts.reduce((s, { debt }) => s + Number(debt.remainingAmount),  0) * 100) / 100;
+  const totalDebtTaken  = Math.round(activeDebts.reduce((s, { debt }) => s + Number(debt.originalAmount),   0) * 100) / 100;
+  const totalPaid       = Math.round((totalDebtTaken - totalRemaining) * 100) / 100;
 
-  // Barcha mahsulotlarni raqamlash uchun
-  let rowNum = 0;
+  const [pdfUrl, setPdfUrl]         = useState<string | null>(null);
+  const [pdfLoading, setPdfLoading] = useState(false);
 
-  const handlePrint = () => {
-    if (!printRef.current) return;
-    const win = window.open('', '_blank');
-    if (!win) return;
-    win.document.write(`
-      <html><head><title>Qarz fakturasi - ${customerName}</title>
-      <style>
-        body { font-family: Arial, sans-serif; font-size: 11px; margin: 20px; color: #111; }
-        table { width: 100%; border-collapse: collapse; margin-top: 8px; }
-        th { background: #1e293b; color: white; padding: 6px 8px; text-align: left; font-size: 10px; }
-        td { padding: 5px 8px; border-bottom: 1px solid #e5e7eb; }
-        .section-header { background: #f1f5f9; font-weight: bold; color: #374151; }
-        .debt-row { background: #fef2f2; }
-        .paid-row { background: #f0fdf4; }
-        .remaining-row { background: #fef9c3; font-weight: bold; }
-        .total-row { background: #1e293b; color: white; font-weight: bold; font-size: 12px; }
-        .info { display: flex; justify-content: space-between; margin-bottom: 16px; }
-        .info-block p { margin: 2px 0; }
-        h2 { margin: 0 0 12px; }
-        .right { text-align: right; }
-        @media print { body { margin: 10px; } }
-      </style></head><body>
-      ${printRef.current.innerHTML}
-      </body></html>
-    `);
-    win.document.close();
-    win.focus();
-    setTimeout(() => { win.print(); win.close(); }, 300);
-  };
+  // Jadval HTML ni PDF blob ga aylantiradi (backend ga murojaat qilmaydi)
 
-  const handleCopyText = async () => {
-    const sep = "-".repeat(40);
-    const dateStr = new Date().toLocaleDateString("uz-UZ");
-    // ✅ FIX: totalRemaining ni to'g'ri yaxlitlash
-    const totalRem = totalRemaining; // already rounded above
-    const parts: string[] = [
-      "QARZDORLIK FAKTURASI",
-      "Mijoz: " + customerName + "  |  Tel: " + customerPhone,
-      "Sana: " + dateStr,
-      sep,
-    ];
-    let n = 1;
-    activeDebts.forEach(({ sale, debt }) => {
-      const saleDate = sale.completedAt || sale.createdAt;
-      const remaining = Math.round(Number(debt.remainingAmount) * 100) / 100;
-      const original  = Math.round(Number(debt.originalAmount) * 100) / 100;
-      const paid      = Math.round((Number(debt.originalAmount) - Number(debt.remainingAmount)) * 100) / 100;
+  const tableRef = useRef<HTMLDivElement>(null);
 
-      parts.push("");
-      parts.push("📋 " + sale.saleNumber + " — " + format(parseISO(saleDate), "dd.MM.yyyy"));
-      sale.items.forEach((item: any) => {
-        parts.push("  " + n++ + ". " + item.productNameSnapshot + " x" + item.quantity + " = " + fmt(item.customTotal));
-      });
-      parts.push("  Savdo jami:      " + fmt(sale.grandTotal));
-      parts.push("  Qarzga olingan:  " + fmt(original));
-      if (paid > 0) parts.push("  Tolangan:        " + fmt(paid));
-      parts.push("  Qoldiq qarz:     " + fmt(remaining));
-      parts.push(sep);
-    });
-    parts.push("UMUMIY QARZ: " + fmt(totalRem));
+  const handleShowPdf = async () => {
+    if (activeDebts.length === 0) return;
+    if (pdfUrl) return;
+    setPdfLoading(true);
     try {
-      await navigator.clipboard.writeText(parts.join("\n"));
-      toast.success("Matn nusxalandi — Telegram yoki boshqa ilovaga joylashtiring");
-    } catch {
-      toast.error("Nusxalab bolmadi");
+      // jsPDF + html2canvas bilan jadval elementini PDF ga aylantirish
+      const element = tableRef.current;
+      if (!element) { toast.error("Jadval topilmadi"); return; }
+
+      const { default: html2canvas } = await import("html2canvas");
+      const { jsPDF }                = await import("jspdf");
+
+      const canvas = await html2canvas(element, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: "#ffffff",
+        logging: false,
+      });
+
+      const imgData = canvas.toDataURL("image/png");
+      const pdf     = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+      const pageW   = pdf.internal.pageSize.getWidth();
+      const pageH   = pdf.internal.pageSize.getHeight();
+      const margin  = 10;
+      const imgW    = pageW - margin * 2;
+      const imgH    = (canvas.height * imgW) / canvas.width;
+
+      let y = margin;
+      if (imgH <= pageH - margin * 2) {
+        pdf.addImage(imgData, "PNG", margin, y, imgW, imgH);
+      } else {
+        // Ko'p sahifa
+        let remainH = imgH;
+        let srcY    = 0;
+        while (remainH > 0) {
+          const sliceH = Math.min(pageH - margin * 2, remainH);
+          const sliceCanvas = document.createElement("canvas");
+          sliceCanvas.width  = canvas.width;
+          sliceCanvas.height = (sliceH / imgH) * canvas.height;
+          const ctx = sliceCanvas.getContext("2d")!;
+          ctx.drawImage(canvas, 0, srcY * (canvas.height / imgH), canvas.width, sliceCanvas.height, 0, 0, canvas.width, sliceCanvas.height);
+          if (srcY > 0) pdf.addPage();
+          pdf.addImage(sliceCanvas.toDataURL("image/png"), "PNG", margin, margin, imgW, sliceH);
+          srcY    += sliceH;
+          remainH -= sliceH;
+        }
+      }
+
+      const pdfBlob = pdf.output("blob");
+      const url     = window.URL.createObjectURL(pdfBlob);
+      setPdfUrl(url);
+    } catch (e) {
+      console.error(e);
+      toast.error("PDF yaratilmadi — npm install jspdf html2canvas");
+    } finally {
+      setPdfLoading(false);
     }
   };
+
+  let rowNum = 0;
 
   if (isLoading) return (
     <div className="flex items-center justify-center h-32">
@@ -168,27 +293,17 @@ function DebtListModal({ customerId, customerName, customerPhone, onClose, onPay
 
   return (
     <div className="space-y-3">
-      {/* ── Amallar ── */}
-      <div className="flex gap-2">
-        <button onClick={handlePrint}
-          className="flex-1 flex items-center justify-center gap-1.5 bg-indigo-600 text-white text-xs font-semibold py-2 rounded-xl hover:bg-indigo-700 transition-colors">
-          <FileText size={13} /> Print / PDF
-        </button>
-        <button onClick={handleCopyText}
-          className="flex-1 flex items-center justify-center gap-1.5 bg-gray-100 text-gray-700 text-xs font-semibold py-2 rounded-xl hover:bg-gray-200 transition-colors">
-          <Phone size={13} /> Ulashish (copy)
-        </button>
-      </div>
 
-      {/* ── Faktura ── */}
-      <div className="max-h-[65vh] overflow-y-auto rounded-xl border border-gray-200 shadow-sm" ref={printRef}>
-
-        {/* Faktura sarlavhasi */}
+      {/* ── Har doim jadval ko'rinishi ── */}
+      <div ref={tableRef} className="rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+        {/* Sarlavha */}
         <div className="bg-gray-800 px-4 py-3">
           <div className="flex items-start justify-between">
             <div>
               <p className="text-white font-bold text-sm">QARZDORLIK FAKTURASI</p>
-              <p className="text-gray-300 text-xs mt-0.5">{new Date().toLocaleDateString('uz-UZ', { day:'numeric', month:'long', year:'numeric' })}</p>
+              <p className="text-gray-300 text-xs mt-0.5">
+                {new Date().toLocaleDateString("uz-UZ", { day: "numeric", month: "long", year: "numeric" })}
+              </p>
             </div>
             <div className="text-right">
               <p className="text-white font-bold text-sm">{customerName}</p>
@@ -210,16 +325,14 @@ function DebtListModal({ customerId, customerName, customerPhone, onClose, onPay
           </thead>
           <tbody>
             {activeDebts.map(({ sale, debt }, sIdx) => {
-              const saleDate   = sale.completedAt || sale.createdAt;
-              const paidAmount = Math.round((Number(debt.originalAmount) - Number(debt.remainingAmount)) * 100) / 100;
-              const debtOriginal = Number(debt.originalAmount);
+              const saleDate      = sale.completedAt || sale.createdAt;
+              const paidAmount    = Math.round((Number(debt.originalAmount) - Number(debt.remainingAmount)) * 100) / 100;
               const debtRemaining = Math.round(Number(debt.remainingAmount) * 100) / 100;
-              const isPartial  = debt.status === "PARTIALLY_PAID";
-              const bgAlt      = sIdx % 2 === 0 ? "bg-white" : "bg-slate-50/60";
+              const isPartial     = debt.status === "PARTIALLY_PAID";
+              const bgAlt         = sIdx % 2 === 0 ? "bg-white" : "bg-slate-50/60";
 
               return (
                 <>
-                  {/* Savdo ajratuvchi qatori */}
                   <tr key={`h-${debt.id}`} className="bg-slate-700">
                     <td colSpan={5} className="px-3 py-1.5">
                       <div className="flex items-center justify-between">
@@ -238,8 +351,7 @@ function DebtListModal({ customerId, customerName, customerPhone, onClose, onPay
                     </td>
                   </tr>
 
-                  {/* Mahsulot qatorlari */}
-                  {sale.items.map((item) => {
+                  {sale.items.map((item: any) => {
                     rowNum++;
                     return (
                       <tr key={item.id} className={`border-b border-gray-100 ${bgAlt}`}>
@@ -252,58 +364,36 @@ function DebtListModal({ customerId, customerName, customerPhone, onClose, onPay
                     );
                   })}
 
-                  {/* Savdo moliyaviy xulosa */}
                   <tr key={`total-${debt.id}`} className={`border-b border-gray-200 ${bgAlt}`}>
-                    <td colSpan={4} className="px-3 py-1.5 text-gray-400 text-right text-xs border-t border-dashed border-gray-200">
-                      Savdo jami
-                    </td>
-                    <td className="px-3 py-1.5 text-right font-semibold text-gray-700 border-t border-dashed border-gray-200">
-                      {fmt(sale.grandTotal)}
-                    </td>
+                    <td colSpan={4} className="px-3 py-1.5 text-gray-400 text-right text-xs border-t border-dashed border-gray-200">Savdo jami</td>
+                    <td className="px-3 py-1.5 text-right font-semibold text-gray-700 border-t border-dashed border-gray-200">{fmt(sale.grandTotal)}</td>
                   </tr>
                   <tr key={`debt-${debt.id}`} className="bg-red-50">
-                    <td colSpan={4} className="px-3 py-1.5 text-red-600 text-right text-xs font-medium">
-                      Qarzga olingan
-                    </td>
-                    <td className="px-3 py-1.5 text-right font-bold text-red-600">
-                      {fmt(Number(debt.originalAmount))}
-                    </td>
+                    <td colSpan={4} className="px-3 py-1.5 text-red-600 text-right text-xs font-medium">Qarzga olingan</td>
+                    <td className="px-3 py-1.5 text-right font-bold text-red-600">{fmt(Number(debt.originalAmount))}</td>
                   </tr>
                   {isPartial && (
                     <>
                       <tr key={`paid-${debt.id}`} className="bg-emerald-50">
-                        <td colSpan={4} className="px-3 py-1.5 text-emerald-600 text-right text-xs font-medium">
-                          To'langan qismi
-                        </td>
-                        <td className="px-3 py-1.5 text-right font-bold text-emerald-600">
-                          {fmt(paidAmount)}
-                        </td>
+                        <td colSpan={4} className="px-3 py-1.5 text-emerald-600 text-right text-xs font-medium">To'langan qismi</td>
+                        <td className="px-3 py-1.5 text-right font-bold text-emerald-600">{fmt(paidAmount)}</td>
                       </tr>
                       <tr key={`rem-${debt.id}`} className="bg-amber-50 border-b-2 border-amber-200">
-                        <td colSpan={4} className="px-3 py-2 text-amber-700 text-right text-xs font-bold">
-                          Qoldiq qarz
-                        </td>
-                        <td className="px-3 py-2 text-right font-black text-amber-700">
-                          {fmt(debtRemaining)}
-                        </td>
+                        <td colSpan={4} className="px-3 py-2 text-amber-700 text-right text-xs font-bold">Qoldiq qarz</td>
+                        <td className="px-3 py-2 text-right font-black text-amber-700">{fmt(debtRemaining)}</td>
                       </tr>
                     </>
                   )}
                   {!isPartial && (
                     <tr key={`undirm-${debt.id}`} className="bg-red-100 border-b-2 border-red-200">
-                      <td colSpan={4} className="px-3 py-2 text-red-700 text-right text-xs font-bold">
-                        Undirilmagan qarz
-                      </td>
-                      <td className="px-3 py-2 text-right font-black text-red-700">
-                        {fmt(debtRemaining)}
-                      </td>
+                      <td colSpan={4} className="px-3 py-2 text-red-700 text-right text-xs font-bold">Undirilmagan qarz</td>
+                      <td className="px-3 py-2 text-right font-black text-red-700">{fmt(debtRemaining)}</td>
                     </tr>
                   )}
                 </>
               );
             })}
 
-            {/* Umumiy jami qatori */}
             <tr className="bg-gray-800">
               <td colSpan={2} className="px-3 py-3 text-white font-bold text-sm">
                 Jami: {activeDebts.length} ta savdo
@@ -321,14 +411,27 @@ function DebtListModal({ customerId, customerName, customerPhone, onClose, onPay
         </table>
       </div>
 
-      {/* To'lash — birinchi (eng qadimgi) qarzdan boshlash */}
+      {/* ── PDF tayyor bo'lsa — 3 ta tugma, yo'q bo'lsa "PDF ko'rish" ── */}
+      {pdfUrl ? (
+        <PdfActionButtons pdfUrl={pdfUrl} filename={`qarz-${customerName}.pdf`} isPdfBlob={true} />
+      ) : (
+        <button
+          onClick={handleShowPdf}
+          disabled={pdfLoading}
+          className="w-full flex items-center justify-center gap-2 bg-indigo-600 text-white text-sm py-3 rounded-xl font-bold hover:bg-indigo-700 active:scale-95 transition-all disabled:opacity-60"
+        >
+          {pdfLoading ? (
+            <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> PDF yuklanmoqda...</>
+          ) : (
+            <><FileText size={16} /> PDF ko'rish</>
+          )}
+        </button>
+      )}
+
+      {/* To'lash tugmasi — har doim ko'rinadi */}
       {activeDebts.length > 0 && (
         <button
-          onClick={() => {
-            const first = activeDebts[0];
-            onPayDebt(first.debt.id, first.debt.remainingAmount);
-            onClose();
-          }}
+          onClick={() => { const first = activeDebts[0]; onPayDebt(first.debt.id, first.debt.remainingAmount); onClose(); }}
           className="w-full bg-emerald-600 text-white text-sm py-3 rounded-xl font-bold hover:bg-emerald-700 active:scale-95 transition-all flex items-center justify-center gap-2"
         >
           <DollarSign size={15} />
@@ -341,7 +444,8 @@ function DebtListModal({ customerId, customerName, customerPhone, onClose, onPay
     </div>
   );
 }
-// ── Return Modal ─────────────────────────────────────────────
+
+// ── Return Modal ──────────────────────────────────────────────
 function ReturnModal({ sale, onClose }: { sale: Sale; onClose: () => void }) {
   const qc = useQueryClient();
   const [quantities, setQuantities] = useState<Record<string, string>>(
@@ -367,11 +471,8 @@ function ReturnModal({ sale, onClose }: { sale: Sale; onClose: () => void }) {
       const blob = await customersApi.getReturnReceipt(returnId);
       const url = window.URL.createObjectURL(new Blob([blob], { type: "application/pdf" }));
       setReceiptUrl(url);
-    } catch {
-      toast.error("Chek yuklanmadi");
-    } finally {
-      setLoadingReceipt(false);
-    }
+    } catch { toast.error("Chek yuklanmadi"); }
+    finally { setLoadingReceipt(false); }
   };
 
   const mutation = useMutation({
@@ -405,9 +506,7 @@ function ReturnModal({ sale, onClose }: { sale: Sale; onClose: () => void }) {
           </div>
           <div>
             <p className="font-semibold text-purple-800 text-sm">Qaytarish yaratildi!</p>
-            <p className="text-xs text-purple-600">
-              #{returnResult?.returnNumber} · Admin tasdiqlashini kuting
-            </p>
+            <p className="text-xs text-purple-600">#{returnResult?.returnNumber} · Admin tasdiqlashini kuting</p>
           </div>
         </div>
         <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 text-xs text-amber-800">
@@ -422,20 +521,11 @@ function ReturnModal({ sale, onClose }: { sale: Sale; onClose: () => void }) {
             <div className="rounded-xl overflow-hidden border border-gray-100" style={{ height: "50vh" }}>
               <iframe src={receiptUrl} className="w-full h-full" title="Qaytarish cheki" />
             </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => { const f = document.querySelector("iframe") as HTMLIFrameElement; f?.contentWindow?.print(); }}
-                className="flex-1 bg-purple-600 text-white py-2.5 rounded-xl font-semibold text-sm"
-              >Print</button>
-              <a
-                href={receiptUrl}
-                download={`return-${returnResult?.returnNumber}.pdf`}
-                className="flex-1 bg-gray-100 text-gray-700 text-center py-2.5 rounded-xl font-semibold text-sm flex items-center justify-center"
-              >PDF yuklash</a>
-            </div>
+            <PdfActionButtons pdfUrl={receiptUrl} filename={`return-${returnResult?.returnNumber}.pdf`} />
           </>
         ) : null}
-        <button onClick={onClose} className="w-full py-2.5 border-2 border-gray-200 rounded-xl text-gray-600 font-semibold text-sm hover:bg-gray-50 transition-colors">
+        <button onClick={onClose}
+          className="w-full py-2.5 border-2 border-gray-200 rounded-xl text-gray-600 font-semibold text-sm hover:bg-gray-50 transition-colors">
           Yopish
         </button>
       </div>
@@ -476,30 +566,21 @@ function ReturnModal({ sale, onClose }: { sale: Sale; onClose: () => void }) {
               <div className="flex items-center gap-2">
                 <span className="text-xs text-gray-500 flex-shrink-0">Qaytarish:</span>
                 <button
-                  onClick={() => {
-                    const cur = parseFloat(quantities[item.id] || "0");
-                    if (cur > 0) setQuantities((p) => ({ ...p, [item.id]: String(cur - 1) }));
-                  }}
-                  className="w-7 h-7 rounded-lg bg-gray-100 text-gray-600 font-bold flex items-center justify-center hover:bg-gray-200 transition-colors"
-                >−</button>
+                  onClick={() => { const cur = parseFloat(quantities[item.id] || "0"); if (cur > 0) setQuantities(p => ({ ...p, [item.id]: String(cur - 1) })); }}
+                  className="w-7 h-7 rounded-lg bg-gray-100 text-gray-600 font-bold flex items-center justify-center hover:bg-gray-200 transition-colors">−</button>
                 <input
-                  type="number" min={0} max={max} step="any"
-                  value={quantities[item.id]}
+                  type="number" min={0} max={max} step="any" value={quantities[item.id]}
                   onChange={(e) => {
                     const val = e.target.value;
                     const num = parseFloat(val);
-                    if (val === "" || val === "0") { setQuantities((p) => ({ ...p, [item.id]: val })); return; }
-                    if (!isNaN(num) && num >= 0 && num <= max) setQuantities((p) => ({ ...p, [item.id]: val }));
+                    if (val === "" || val === "0") { setQuantities(p => ({ ...p, [item.id]: val })); return; }
+                    if (!isNaN(num) && num >= 0 && num <= max) setQuantities(p => ({ ...p, [item.id]: val }));
                   }}
                   className="w-14 text-center text-xs border border-gray-200 rounded-lg py-1 focus:outline-none focus:border-purple-400 font-bold"
                 />
                 <button
-                  onClick={() => {
-                    const cur = parseFloat(quantities[item.id] || "0");
-                    if (cur < max) setQuantities((p) => ({ ...p, [item.id]: String(cur + 1) }));
-                  }}
-                  className="w-7 h-7 rounded-lg bg-gray-100 text-gray-600 font-bold flex items-center justify-center hover:bg-gray-200 transition-colors"
-                >+</button>
+                  onClick={() => { const cur = parseFloat(quantities[item.id] || "0"); if (cur < max) setQuantities(p => ({ ...p, [item.id]: String(cur + 1) })); }}
+                  className="w-7 h-7 rounded-lg bg-gray-100 text-gray-600 font-bold flex items-center justify-center hover:bg-gray-200 transition-colors">+</button>
                 <span className="text-xs text-gray-400">/ {max}</span>
               </div>
             </div>
@@ -511,8 +592,7 @@ function ReturnModal({ sale, onClose }: { sale: Sale; onClose: () => void }) {
         <label className="text-xs font-semibold text-gray-600 mb-1.5 block">Qaytarish sababi</label>
         <textarea
           value={reason} onChange={(e) => setReason(e.target.value)}
-          placeholder="Masalan: mahsulot nuqsonli..."
-          rows={2}
+          placeholder="Masalan: mahsulot nuqsonli..." rows={2}
           className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-purple-400 resize-none"
         />
       </div>
@@ -530,10 +610,7 @@ function ReturnModal({ sale, onClose }: { sale: Sale; onClose: () => void }) {
           className="flex-1 !bg-purple-600 hover:!bg-purple-700"
           isLoading={mutation.isPending}
           disabled={selectedItems.length === 0}
-          onClick={() => {
-            if (selectedItems.length === 0) { toast.error("Kamida 1 ta mahsulot tanlang"); return; }
-            mutation.mutate();
-          }}
+          onClick={() => { if (selectedItems.length === 0) { toast.error("Kamida 1 ta mahsulot tanlang"); return; } mutation.mutate(); }}
         >
           Qaytarishni yuborish
         </Button>
@@ -542,7 +619,7 @@ function ReturnModal({ sale, onClose }: { sale: Sale; onClose: () => void }) {
   );
 }
 
-// ── Customer Form Modal ──────────────────────────────────────
+// ── Customer Form Modal ───────────────────────────────────────
 function CustomerFormModal({ customer, onClose }: { customer?: Customer | null; onClose: () => void }) {
   const qc = useQueryClient();
   const [name, setName] = useState(customer?.name ?? "");
@@ -609,7 +686,7 @@ function CustomerFormModal({ customer, onClose }: { customer?: Customer | null; 
   );
 }
 
-// ── Pay Debt Modal ───────────────────────────────────────────
+// ── Pay Debt Modal ────────────────────────────────────────────
 function PayDebtModal({ debtId, remaining, onClose }: { debtId: string; remaining: number; onClose: () => void }) {
   const qc = useQueryClient();
   const [amount, setAmount] = useState(String(remaining));
@@ -631,7 +708,8 @@ function PayDebtModal({ debtId, remaining, onClose }: { debtId: string; remainin
   };
 
   const mutation = useMutation({
-    mutationFn: () => api.post(`/debts/${debtId}/payment`, { amount: Number(amount), paymentMethod: method, notes: note || undefined }),
+    mutationFn: () =>
+      api.post(`/debts/${debtId}/payment`, { amount: Number(amount), paymentMethod: method, notes: note || undefined }),
     onSuccess: () => {
       toast.success("To'lov amalga oshirildi!");
       qc.invalidateQueries({ queryKey: ["customers"] });
@@ -666,17 +744,11 @@ function PayDebtModal({ debtId, remaining, onClose }: { debtId: string; remainin
             <div className="rounded-xl overflow-hidden border border-gray-100" style={{ height: "50vh" }}>
               <iframe src={receiptUrl} className="w-full h-full" title="Qarz to'lov cheki" />
             </div>
-            <div className="flex gap-2">
-              <button onClick={() => { const f = document.querySelector("iframe") as HTMLIFrameElement; f?.contentWindow?.print(); }}
-                className="flex-1 bg-indigo-600 text-white py-2.5 rounded-xl font-semibold text-sm">Print</button>
-              <a href={receiptUrl} download={`qarz-chek-${debtId.slice(0, 8)}.pdf`}
-                className="flex-1 bg-gray-100 text-gray-700 text-center py-2.5 rounded-xl font-semibold text-sm flex items-center justify-center">
-                PDF yuklash
-              </a>
-            </div>
+            <PdfActionButtons pdfUrl={receiptUrl} filename={`qarz-chek-${debtId.slice(0, 8)}.pdf`} />
           </>
         ) : null}
-        <button onClick={onClose} className="w-full py-2.5 border-2 border-gray-200 rounded-xl text-gray-600 font-semibold text-sm hover:bg-gray-50 transition-colors">
+        <button onClick={onClose}
+          className="w-full py-2.5 border-2 border-gray-200 rounded-xl text-gray-600 font-semibold text-sm hover:bg-gray-50 transition-colors">
           Yopish
         </button>
       </div>
@@ -702,7 +774,9 @@ function PayDebtModal({ debtId, remaining, onClose }: { debtId: string; remainin
         <div className="flex gap-2">
           {(["CASH", "CARD"] as const).map((m) => (
             <button key={m} onClick={() => setMethod(m)}
-              className={`flex-1 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-1.5 transition-all ${method === m ? "bg-indigo-600 text-white shadow-sm" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
+              className={`flex-1 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                method === m ? "bg-indigo-600 text-white shadow-sm" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+              }`}>
               {m === "CASH" ? <><Banknote size={15} />Naqd</> : <><CreditCard size={15} />Karta</>}
             </button>
           ))}
@@ -721,7 +795,7 @@ function PayDebtModal({ debtId, remaining, onClose }: { debtId: string; remainin
   );
 }
 
-// ── Sale Receipt Modal ───────────────────────────────────────
+// ── Sale Receipt Modal ────────────────────────────────────────
 function SaleReceiptModal({ saleId, saleNumber }: { saleId: string; saleNumber: string; onClose: () => void }) {
   const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -749,14 +823,7 @@ function SaleReceiptModal({ saleId, saleNumber }: { saleId: string; saleNumber: 
           <div className="rounded-xl overflow-hidden border border-gray-100" style={{ height: "60vh" }}>
             <iframe src={receiptUrl} className="w-full h-full" title={`Chek #${saleNumber}`} />
           </div>
-          <div className="flex gap-2">
-            <button onClick={() => { const iframe = document.querySelector("iframe") as HTMLIFrameElement; iframe?.contentWindow?.print(); }}
-              className="flex-1 bg-indigo-600 text-white py-2.5 rounded-xl font-semibold text-sm">Print</button>
-            <a href={receiptUrl} download={`chek-${saleNumber}.pdf`}
-              className="flex-1 bg-gray-100 text-gray-700 text-center py-2.5 rounded-xl font-semibold text-sm flex items-center justify-center">
-              PDF yuklash
-            </a>
-          </div>
+          <PdfActionButtons pdfUrl={receiptUrl} filename={`chek-${saleNumber}.pdf`} />
         </>
       ) : (
         <p className="text-center text-gray-400 py-8">Chek topilmadi</p>
@@ -765,7 +832,7 @@ function SaleReceiptModal({ saleId, saleNumber }: { saleId: string; saleNumber: 
   );
 }
 
-// ── Sale Card ────────────────────────────────────────────────
+// ── Sale Card ─────────────────────────────────────────────────
 function SaleCard({ sale, onPayDebt, onViewReceipt, onReturn }: {
   sale: Sale;
   onPayDebt: (debtId: string, remaining: number) => void;
@@ -773,7 +840,7 @@ function SaleCard({ sale, onPayDebt, onViewReceipt, onReturn }: {
   onReturn: (sale: Sale) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const hasDebt = sale.debt && sale.debt.remainingAmount > 0;
+  const hasDebt    = sale.debt && sale.debt.remainingAmount > 0;
   const isDebtSale = sale.payments?.some(p => p.method === "DEBT");
   const hasReturns = sale.returns && sale.returns.length > 0;
   const isReturned = sale.status === "RETURNED";
@@ -812,7 +879,6 @@ function SaleCard({ sale, onPayDebt, onViewReceipt, onReturn }: {
 
       {expanded && (
         <div className="border-t border-gray-100 px-4 py-3 space-y-3 bg-white/80">
-          {/* Mahsulotlar */}
           <div className="space-y-1.5">
             {sale.items.map((item: any) => (
               <div key={item.id} className="flex items-center justify-between">
@@ -826,7 +892,6 @@ function SaleCard({ sale, onPayDebt, onViewReceipt, onReturn }: {
             ))}
           </div>
 
-          {/* To'lovlar */}
           <div className="flex gap-1.5 flex-wrap">
             {sale.payments.map((p: any) => (
               <span key={p.id} className={`text-xs px-2.5 py-1 rounded-lg font-semibold flex items-center gap-1 ${
@@ -840,7 +905,6 @@ function SaleCard({ sale, onPayDebt, onViewReceipt, onReturn }: {
             ))}
           </div>
 
-          {/* Qarz to'lash */}
           {sale.debt && (sale.debt.status === "PENDING" || sale.debt.status === "PARTIALLY_PAID") && (
             <div className="bg-red-50 border border-red-100 rounded-xl p-3 flex items-center justify-between">
               <div>
@@ -854,7 +918,6 @@ function SaleCard({ sale, onPayDebt, onViewReceipt, onReturn }: {
             </div>
           )}
 
-          {/* Qaytarishlar ro'yxati */}
           {hasReturns && (
             <div className="space-y-1.5">
               {sale.returns!.map((ret) => (
@@ -885,7 +948,6 @@ function SaleCard({ sale, onPayDebt, onViewReceipt, onReturn }: {
             </div>
           )}
 
-          {/* Qaytarish tugmasi — faqat COMPLETED savdolarda */}
           {sale.status === "COMPLETED" && (
             <button onClick={() => onReturn(sale)}
               className="w-full flex items-center justify-center gap-2 text-xs text-purple-600 font-semibold py-2 rounded-lg hover:bg-purple-50 transition-colors border border-purple-100">
@@ -893,7 +955,6 @@ function SaleCard({ sale, onPayDebt, onViewReceipt, onReturn }: {
             </button>
           )}
 
-          {/* Chek ko'rish */}
           <button onClick={() => onViewReceipt(sale.id, sale.saleNumber)}
             className="w-full flex items-center justify-center gap-2 text-xs text-indigo-600 font-semibold py-2 rounded-lg hover:bg-indigo-50 transition-colors border border-indigo-100">
             <FileText size={13} /> Chekni ko'rish
@@ -904,16 +965,16 @@ function SaleCard({ sale, onPayDebt, onViewReceipt, onReturn }: {
   );
 }
 
-// ── Customer Detail ──────────────────────────────────────────
+// ── Customer Detail ───────────────────────────────────────────
 function CustomerDetail({ customer, onBack, onEdit, onDelete }: {
   customer: Customer; onBack: () => void; onEdit: () => void; onDelete: () => void;
 }) {
   const [tab, setTab] = useState<"sales" | "stats">("sales");
-  const [payingDebt, setPayingDebt] = useState<{ id: string; remaining: number } | null>(null);
+  const [payingDebt, setPayingDebt]         = useState<{ id: string; remaining: number } | null>(null);
   const [viewingReceipt, setViewingReceipt] = useState<{ id: string; number: string } | null>(null);
-  const [returningItem, setReturningItem] = useState<Sale | null>(null);
-  const [showDebtList, setShowDebtList] = useState(false);
-  const [salesPage, setSalesPage] = useState(1);
+  const [returningItem, setReturningItem]   = useState<Sale | null>(null);
+  const [showDebtList, setShowDebtList]     = useState(false);
+  const [salesPage, setSalesPage]           = useState(1);
 
   const { data: salesData, isLoading: salesLoading } = useQuery({
     queryKey: ["customer-sales", customer.id, salesPage],
@@ -957,20 +1018,16 @@ function CustomerDetail({ customer, onBack, onEdit, onDelete }: {
             <p className="text-xs text-emerald-400 font-medium">Jami</p>
             <p className="font-bold text-emerald-800 text-sm">{fmt(stats.totalAmount)}</p>
           </div>
-          {/* Qarz kartasi — bosish mumkin */}
           <button
             onClick={() => stats.totalDebt > 0 && setShowDebtList(true)}
             className={`rounded-xl p-3 text-center transition-all ${
               stats.totalDebt > 0
                 ? "bg-red-50 hover:bg-red-100 hover:shadow-sm cursor-pointer active:scale-95"
                 : "bg-gray-50 cursor-default"
-            }`}
-          >
+            }`}>
             <p className={`text-xs font-medium ${stats.totalDebt > 0 ? "text-red-400" : "text-gray-400"}`}>Qarz</p>
             <p className={`font-bold text-sm ${stats.totalDebt > 0 ? "text-red-700" : "text-gray-500"}`}>{fmt(stats.totalDebt)}</p>
-            {stats.totalDebt > 0 && (
-              <p className="text-xs text-red-400 mt-0.5">ko'rish →</p>
-            )}
+            {stats.totalDebt > 0 && <p className="text-xs text-red-400 mt-0.5">ko'rish →</p>}
           </button>
         </div>
       )}
@@ -1030,9 +1087,9 @@ function CustomerDetail({ customer, onBack, onEdit, onDelete }: {
               ))}
               {(salesData?.total ?? 0) > 20 && (
                 <div className="flex items-center justify-between pt-2">
-                  <Button variant="outline" size="sm" onClick={() => setSalesPage((p) => Math.max(1, p - 1))} disabled={salesPage === 1}>Oldingi</Button>
+                  <Button variant="outline" size="sm" onClick={() => setSalesPage(p => Math.max(1, p - 1))} disabled={salesPage === 1}>Oldingi</Button>
                   <span className="text-sm text-gray-500">{salesPage} / {Math.ceil((salesData?.total ?? 0) / 20)}</span>
-                  <Button variant="outline" size="sm" onClick={() => setSalesPage((p) => p + 1)} disabled={salesPage >= Math.ceil((salesData?.total ?? 0) / 20)}>Keyingi</Button>
+                  <Button variant="outline" size="sm" onClick={() => setSalesPage(p => p + 1)} disabled={salesPage >= Math.ceil((salesData?.total ?? 0) / 20)}>Keyingi</Button>
                 </div>
               )}
             </>
@@ -1092,28 +1149,22 @@ function CustomerDetail({ customer, onBack, onEdit, onDelete }: {
         </div>
       )}
 
-      {/* Debt List Modal */}
       <Modal isOpen={showDebtList} onClose={() => setShowDebtList(false)} title="Faol qarzlar" size="sm">
         <DebtListModal
-          customerId={customer.id}
-          customerName={customer.name}
-          customerPhone={customer.phone}
+          customerId={customer.id} customerName={customer.name} customerPhone={customer.phone}
           onClose={() => setShowDebtList(false)}
           onPayDebt={(id, remaining) => { setShowDebtList(false); setPayingDebt({ id, remaining }); }}
         />
       </Modal>
 
-      {/* Pay Debt Modal */}
       <Modal isOpen={!!payingDebt} onClose={() => setPayingDebt(null)} title="Qarz to'lovi" size="sm">
         {payingDebt && <PayDebtModal debtId={payingDebt.id} remaining={payingDebt.remaining} onClose={() => setPayingDebt(null)} />}
       </Modal>
 
-      {/* Receipt Modal */}
       <Modal isOpen={!!viewingReceipt} onClose={() => setViewingReceipt(null)} title={`Chek #${viewingReceipt?.number}`} size="md">
         {viewingReceipt && <SaleReceiptModal saleId={viewingReceipt.id} saleNumber={viewingReceipt.number} onClose={() => setViewingReceipt(null)} />}
       </Modal>
 
-      {/* Return Modal */}
       <Modal isOpen={!!returningItem} onClose={() => setReturningItem(null)} title={"Qaytarish — #" + (returningItem?.saleNumber ?? "")} size="md">
         {returningItem && <ReturnModal sale={returningItem} onClose={() => setReturningItem(null)} />}
       </Modal>
@@ -1121,14 +1172,14 @@ function CustomerDetail({ customer, onBack, onEdit, onDelete }: {
   );
 }
 
-// ── Main Page ────────────────────────────────────────────────
+// ── Main Page ─────────────────────────────────────────────────
 export function CustomersPage() {
   const qc = useQueryClient();
-  const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<"all" | "debt" | "paid">("all");
-  const [selected, setSelected] = useState<Customer | null>(null);
-  const [showForm, setShowForm] = useState(false);
-  const [editTarget, setEditTarget] = useState<Customer | null>(null);
+  const [search, setSearch]             = useState("");
+  const [filter, setFilter]             = useState<"all" | "debt" | "paid">("all");
+  const [selected, setSelected]         = useState<Customer | null>(null);
+  const [showForm, setShowForm]         = useState(false);
+  const [editTarget, setEditTarget]     = useState<Customer | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Customer | null>(null);
 
   const { data: customers = [], isLoading } = useQuery({
@@ -1143,7 +1194,7 @@ export function CustomersPage() {
     return list;
   }, [customers, filter]);
 
-  const totalDebt = useMemo(() => customers.reduce((s: number, c: any) => s + (c.totalDebt ?? 0), 0), [customers]);
+  const totalDebt   = useMemo(() => customers.reduce((s: number, c: any) => s + (c.totalDebt ?? 0), 0), [customers]);
   const debtorCount = useMemo(() => customers.filter((c: any) => (c.totalDebt ?? 0) > 0).length, [customers]);
 
   const deleteMutation = useMutation({
