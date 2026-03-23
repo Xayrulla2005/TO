@@ -1,5 +1,5 @@
 // ============================================================
-// src/sale/resipt.service.ts
+// src/sales/resipt.service.ts — v2 (nasiya qoldiqi qo'shildi)
 // ============================================================
 import { Injectable } from '@nestjs/common';
 import { Response } from 'express';
@@ -136,7 +136,6 @@ export class ReceiptService {
     }
 
     // ── TABLE ──
-    // Chegirma ustuni borligini tekshirish
     const hasAnyDiscount = sale.items.some(item => {
       const originalPrice = Number(item.baseUnitPrice);
       const customPrice = Number(item.customUnitPrice);
@@ -157,13 +156,12 @@ export class ReceiptService {
           no:       { x: L,           w: 25  },
           name:     { x: L + 25,      w: 225 },
           qty:      { x: L + 250,     w: 65  },
-          origPrice:{ x: L + 315,     w: 0   },  // yo'q
-          discount: { x: L + 315,     w: 0   },  // yo'q
+          origPrice:{ x: L + 315,     w: 0   },
+          discount: { x: L + 315,     w: 0   },
           price:    { x: L + 315,     w: 100 },
           total:    { x: L + 415,     w: 100 },
         };
 
-    // Jadval sarlavhasi
     doc.save().rect(L, y, PW, 22).fillColor('#1e293b').fill().restore();
     cell('Nr',           col.no.x,    y, col.no.w,    { bold: true, color: '#ffffff', align: 'center' });
     cell('Mahsulot',     col.name.x,  y, col.name.w,  { bold: true, color: '#ffffff' });
@@ -178,12 +176,10 @@ export class ReceiptService {
     cell('Jami',         col.total.x, y, col.total.w, { bold: true, color: '#ffffff', align: 'right' });
     y += 22;
 
-    // Vertikal chiziq uchun x nuqtalar
     const vlines = hasAnyDiscount
       ? [col.no.x + col.no.w, col.qty.x, col.origPrice.x, col.discount.x, col.price.x, col.total.x]
       : [col.no.x + col.no.w, col.qty.x, col.price.x, col.total.x];
 
-    // Asl narxlar jami (chegirma foizini hisoblash uchun)
     let originalSubtotal = 0;
 
     sale.items.forEach((item, idx) => {
@@ -202,7 +198,6 @@ export class ReceiptService {
 
       originalSubtotal += itemOriginalTotal;
 
-      // Chegirma foizi (faqat narx pasaytirilgan bo'lsa)
       const itemDiscountPercent = basePrice > 0 && customPrice < basePrice
         ? parseFloat(((1 - customPrice / basePrice) * 100).toFixed(1))
         : 0;
@@ -217,7 +212,6 @@ export class ReceiptService {
       cell(String(quantity), col.qty.x, y, col.qty.w, { align: 'center' });
 
       if (hasAnyDiscount) {
-        // Asl narx — chegirma bo'lsa kulrang chizilgan, bo'lmasa oddiy
         if (itemDiscountPercent > 0) {
           doc.save()
             .font('Helvetica').fontSize(8).fillColor('#94a3b8')
@@ -225,7 +219,6 @@ export class ReceiptService {
               width: col.origPrice.w - 8, align: 'right', lineBreak: false,
             })
             .restore();
-          // Ustidan chiziq
           const tx = col.origPrice.x + 4;
           const tw = col.origPrice.w - 8;
           const ty = y + 3 + 4;
@@ -234,7 +227,6 @@ export class ReceiptService {
             .lineWidth(0.8).strokeColor('#94a3b8').stroke()
             .restore();
 
-          // Chegirma badge — foiz
           const badgeText = `-${itemDiscountPercent}%`;
           fillRect(col.discount.x + 4, y + 3, col.discount.w - 8, 14, '#fef3c7');
           doc.save()
@@ -244,13 +236,11 @@ export class ReceiptService {
             })
             .restore();
         } else {
-          // Chegirma yo'q — asl narx oddiy ko'rsatiladi
           cell(fmt(basePrice), col.origPrice.x, y, col.origPrice.w, { align: 'right', color: '#94a3b8', size: 8 });
           cell('-', col.discount.x, y, col.discount.w, { align: 'center', color: '#cbd5e1', size: 8 });
         }
       }
 
-      // Sotish narxi — chegirma bo'lsa to'q ko'k
       cell(
         fmt(customPrice),
         col.price.x, y, col.price.w,
@@ -267,7 +257,6 @@ export class ReceiptService {
       y += rowH;
     });
 
-    // Jadval chegarasi
     const tableStartY = y - sale.items.reduce((s, item) => {
       const nameLines = Math.ceil(item.productNameSnapshot.length / (hasAnyDiscount ? 22 : 28));
       return s + Math.max(20, nameLines * 12 + 8);
@@ -280,11 +269,6 @@ export class ReceiptService {
     const grandTotal = Number(sale.grandTotal);
     const totalDiscount = Number(sale.totalDiscount);
 
-    // Narx o'zgartirishdan chegirma (har bir mahsulot uchun)
-    const priceDiscount = originalSubtotal - (originalSubtotal - (originalSubtotal - grandTotal - totalDiscount > 0 ? originalSubtotal - grandTotal - totalDiscount : 0));
-    const itemLevelDiscount = originalSubtotal - grandTotal - totalDiscount;
-
-    // Mahsulot narx chegirmasi (customUnitPrice < baseUnitPrice farqi)
     const itemPriceDiscountTotal = sale.items.reduce((sum, item) => {
       const base = Number(item.baseUnitPrice);
       const custom = Number(item.customUnitPrice);
@@ -296,7 +280,6 @@ export class ReceiptService {
       ? parseFloat(((1 - grandTotal / originalSubtotal) * 100).toFixed(2))
       : 0;
 
-    // Narx chegirmasi qatori
     if (itemPriceDiscountTotal > 0) {
       const pct = originalSubtotal > 0
         ? parseFloat(((itemPriceDiscountTotal / originalSubtotal) * 100).toFixed(2))
@@ -311,7 +294,6 @@ export class ReceiptService {
       y += 18;
     }
 
-    // Qo'shimcha chegirma (discountAmount)
     if (totalDiscount > 0) {
       const pct = originalSubtotal > 0
         ? parseFloat(((totalDiscount / originalSubtotal) * 100).toFixed(2))
@@ -326,7 +308,6 @@ export class ReceiptService {
       y += 18;
     }
 
-    // Umumiy chegirma foizi satrini ko'rsatish (agar chegirma bo'lsa)
     if (overallDiscountPercent > 0) {
       fillRect(L, y, PW, 18, '#f0fdf4');
       doc.save().font('Helvetica').fontSize(9).fillColor('#16a34a')
@@ -349,7 +330,6 @@ export class ReceiptService {
       .text(fmt(grandTotal), L, y + 5, { width: PW - 8, align: 'right' })
       .restore();
 
-    // Agar chegirma bo'lsa, asl narxni ham ko'rsat
     if (overallDiscountPercent > 0) {
       doc.save().font('Helvetica').fontSize(8).fillColor('#94a3b8')
         .text(`(Asl: ${fmt(originalSubtotal)})`, L + 8, y + 18)
@@ -386,6 +366,52 @@ export class ReceiptService {
 
       doc.save().rect(L, y - sale.payments.length * 18 - 18, PW, 18 + sale.payments.length * 18)
         .lineWidth(0.5).strokeColor('#cbd5e1').stroke().restore();
+    }
+
+    // ── NASIYA QOLDIQI (faqat nasiya to'lov bo'lsa) ──
+    // Bu blok savdo chekida mijozning joriy va umumiy qarz holatini ko'rsatadi
+    if (debtPayment && sale.debt) {
+      y += 8;
+
+      const debtOriginal = Number(sale.debt.originalAmount);
+      const debtRemaining = Number(sale.debt.remainingAmount);
+      const debtPaid = debtOriginal - debtRemaining;
+      const isDebtFullyPaid = sale.debt.status === 'PAID';
+
+      fillRect(L, y, PW, 18, '#1e3a5f');
+      doc.save().font('Helvetica-Bold').fontSize(9).fillColor('#ffffff')
+        .text('NASIYA HOLATI', L + 8, y + 4)
+        .restore();
+      y += 18;
+
+      // Nasiya miqdori
+      fillRect(L, y, PW, 18, '#fef2f2');
+      doc.save().font('Helvetica').fontSize(9).fillColor('#dc2626').text('Nasiya miqdori:', L + 8, y + 4).restore();
+      doc.save().font('Helvetica-Bold').fontSize(9).fillColor('#dc2626').text(fmt(debtOriginal), L, y + 4, { width: PW - 8, align: 'right' }).restore();
+      hline(y + 18, 0.3, '#fecaca');
+      y += 18;
+
+      // To'langan qism
+      if (debtPaid > 0) {
+        fillRect(L, y, PW, 18, '#f0fdf4');
+        doc.save().font('Helvetica').fontSize(9).fillColor('#16a34a').text("To'langan:", L + 8, y + 4).restore();
+        doc.save().font('Helvetica-Bold').fontSize(9).fillColor('#16a34a').text(fmt(debtPaid), L, y + 4, { width: PW - 8, align: 'right' }).restore();
+        hline(y + 18, 0.3, '#bbf7d0');
+        y += 18;
+      }
+
+      // Qolgan qoldiq — asosiy
+      fillRect(L, y, PW, 28, isDebtFullyPaid ? '#166534' : '#7f1d1d');
+      doc.save().font('Helvetica-Bold').fontSize(10).fillColor('#ffffff')
+        .text(isDebtFullyPaid ? "NASIYA TO'LANDI!" : 'QOLGAN QOLDIQ:', L + 8, y + 8)
+        .restore();
+      doc.save().font('Helvetica-Bold').fontSize(14).fillColor(isDebtFullyPaid ? '#86efac' : '#fef08a')
+        .text(isDebtFullyPaid ? '$0' : fmt(debtRemaining), L, y + 6, { width: PW - 8, align: 'right' })
+        .restore();
+
+      doc.save().rect(L, y - (debtPaid > 0 ? 54 : 36), PW, (debtPaid > 0 ? 54 : 36) + 28)
+        .lineWidth(0.8).strokeColor('#dc2626').stroke().restore();
+      y += 36;
     }
 
     // ── FOOTER ──

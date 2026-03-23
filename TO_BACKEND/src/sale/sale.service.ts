@@ -1,5 +1,5 @@
 // ============================================================
-// src/sales/sales.service.ts
+// src/sales/sales.service.ts — FIXED v2 (customerId always saved)
 // ============================================================
 import {
   Injectable,
@@ -228,7 +228,7 @@ export class SalesService {
         if (!product) throw new NotFoundException(`Product ${item.productNameSnapshot} not found`);
 
         const currentStock = parseFloat(String(product.stockQuantity));
-        const required     = parseFloat(String(item.quantity));
+        const required = parseFloat(String(item.quantity));
 
         if (currentStock < required) {
           throw new BadRequestException(
@@ -238,7 +238,6 @@ export class SalesService {
 
         const newStock = parseFloat((currentStock - required).toFixed(3));
 
-        // ✅ FIX: save() o'rniga raw SQL — TypeORM int cache bypass
         await queryRunner.query(
           `UPDATE products SET stock_quantity = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
           [newStock, product.id],
@@ -269,11 +268,14 @@ export class SalesService {
       }
 
       // ── Mijozni topish yoki yaratish ──────────────────────
+      // FIX: customerId har doim saqlanadi — debt bo'lmasa ham
       let customerId: string | null = null;
 
       if (dto.customerId) {
+        // 1) Frontend customerId yuborgan bo'lsa — ishlatamiz
         customerId = dto.customerId;
       } else if (resolvedCustomerName && resolvedCustomerPhone) {
+        // 2) Ism/telefon berilgan bo'lsa — topamiz yoki yaratamiz
         let customer = await queryRunner.manager.findOne(CustomerEntity, {
           where: { phone: resolvedCustomerPhone },
         });
@@ -291,6 +293,7 @@ export class SalesService {
 
         customerId = customer.id;
       }
+      // 3) Na customerId, na ism/telefon berilmagan → customerId = null (anonim savdo)
 
       // ── Debt yaratish ─────────────────────────────────────
       if (debtPayment) {
@@ -307,13 +310,14 @@ export class SalesService {
       }
 
       // ── Sale ni yangilash ─────────────────────────────────
+      // FIX: customerId null bo'lsa ham explicitly null saqlaymiz
       await queryRunner.manager
         .createQueryBuilder()
         .update(SaleEntity)
         .set({
           status: SaleStatus.COMPLETED,
           completedAt: new Date(),
-          ...(customerId ? { customerId } : {}),
+          customerId: customerId,   // ← null bo'lsa null, id bo'lsa id
         })
         .where('id = :id', { id: sale.id })
         .execute();
@@ -329,6 +333,7 @@ export class SalesService {
           status: SaleStatus.COMPLETED,
           saleNumber: sale.saleNumber,
           grandTotal: Number(sale.grandTotal),
+          customerId: customerId || null,
           customerName: resolvedCustomerName || null,
           customerPhone: resolvedCustomerPhone || null,
         },
@@ -361,10 +366,9 @@ export class SalesService {
           });
           if (product) {
             const stockBefore = parseFloat(String(product.stockQuantity));
-            const restore     = parseFloat(String(item.quantity));
-            const stockAfter  = parseFloat((stockBefore + restore).toFixed(3));
+            const restore = parseFloat(String(item.quantity));
+            const stockAfter = parseFloat((stockBefore + restore).toFixed(3));
 
-            // ✅ FIX: raw SQL
             await queryRunner.query(
               `UPDATE products SET stock_quantity = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
               [stockAfter, product.id],

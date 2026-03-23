@@ -1,54 +1,61 @@
-// ============================================================
-// src/debts/debts.service.ts - PRODUCTION COMPLETE
-// ============================================================
+// src/debts/debts.service.ts — PRODUCTION COMPLETE v3
 import {
   Injectable,
   NotFoundException,
   BadRequestException,
-} from "@nestjs/common";
-import { InjectRepository } from "@nestjs/typeorm";
-import { Repository, DataSource } from "typeorm";
-import { DebtEntity, DebtStatus } from "./entities/debt.entity";
-import { SaleEntity } from "../sale/entities/sale.entity";
-import { DebtQueryDto } from "./dto/debt.query.dto";
-import { PaginatedResponseDto } from "../common/dto/pagination.dto";
-import { AuditLogService } from "../audit-logs/audit-logs.service";
+} from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository, DataSource } from 'typeorm';
+import { DebtEntity, DebtStatus } from './entities/debt.entity';
+import { DebtPaymentEntity, DebtPaymentMethod } from './entities/debt-payment.entity';
+import { SaleEntity } from '../sale/entities/sale.entity';
+import { DebtQueryDto } from './dto/debt.query.dto';
+import { PaginatedResponseDto } from '../common/dto/pagination.dto';
+import { AuditLogService } from '../audit-logs/audit-logs.service';
 import {
   AuditAction,
   AuditEntity as AuditEntityEnum,
-} from "../audit-logs/entities/audit-log.entity";
-import { MakePaymentDto } from "./dto/make.payment.dto";
-import { Response } from "express";
-import PDFDocument from "pdfkit";
+} from '../audit-logs/entities/audit-log.entity';
+import { MakePaymentDto } from './dto/make.payment.dto';
+import { Response } from 'express';
+import PDFDocument from 'pdfkit';
+
+// ── Fix: DebtEntity & { payments: ... } intersection "never" xatosini hal qiladi ──
+export interface DebtWithPayments extends Omit<DebtEntity, 'payments'> {
+  payments: DebtPaymentEntity[];
+}
 
 @Injectable()
 export class DebtsService {
   constructor(
     @InjectRepository(DebtEntity)
     private readonly debtRepository: Repository<DebtEntity>,
+    @InjectRepository(DebtPaymentEntity)
+    private readonly debtPaymentRepository: Repository<DebtPaymentEntity>,
     @InjectRepository(SaleEntity)
     private readonly saleRepository: Repository<SaleEntity>,
     private readonly dataSource: DataSource,
     private readonly auditLogService: AuditLogService,
   ) {}
 
+  // ── findAll ──────────────────────────────────────────────────
   async findAll(query: DebtQueryDto) {
     const page = Number(query.page ?? 1);
     const limit = Number(query.limit ?? 20);
 
     const qb = this.debtRepository
-      .createQueryBuilder("debt")
-      .leftJoinAndSelect("debt.sale", "sale")
-      .orderBy("debt.createdAt", "DESC");
+      .createQueryBuilder('debt')
+      .leftJoinAndSelect('debt.sale', 'sale')
+      .orderBy('debt.createdAt', 'DESC');
 
     if (query.search) {
       qb.andWhere(
-        "(debt.debtorName ILIKE :search OR debt.debtorPhone ILIKE :search)",
+        '(debt.debtorName ILIKE :search OR debt.debtorPhone ILIKE :search)',
         { search: `%${query.search}%` },
       );
     }
     if (query.status) {
-      qb.andWhere("debt.status = :status", { status: query.status });
+      qb.andWhere('debt.status = :status', { status: query.status });
     }
 
     const [debts, total] = await qb
@@ -58,7 +65,9 @@ export class DebtsService {
 
     return PaginatedResponseDto.create(
       debts.map((d) => this.buildDebtResponse(d)),
-      total, page, limit,
+      total,
+      page,
+      limit,
     );
   }
 
@@ -76,16 +85,38 @@ export class DebtsService {
     };
   }
 
+  // ── findOne ──────────────────────────────────────────────────
   async findOne(id: string): Promise<DebtEntity> {
     const debt = await this.debtRepository.findOne({
       where: { id },
-      relations: ["sale"],
+      relations: ['sale'],
     });
-    if (!debt) throw new NotFoundException("Debt not found");
+    if (!debt) throw new NotFoundException('Debt not found');
     return debt;
   }
 
-  async makePayment(debtId: string, dto: MakePaymentDto, userId: string): Promise<DebtEntity> {
+  // ── findOneWithPayments ──────────────────────────────────────
+  async findOneWithPayments(id: string): Promise<DebtWithPayments> {
+    const debt = await this.debtRepository.findOne({
+      where: { id },
+      relations: ['sale'],
+    });
+    if (!debt) throw new NotFoundException('Debt not found');
+
+    const payments = await this.debtPaymentRepository.find({
+      where: { debtId: id },
+      order: { createdAt: 'DESC' },
+    });
+
+    return { ...debt, payments } as DebtWithPayments;
+  }
+
+  // ── makePayment ──────────────────────────────────────────────
+  async makePayment(
+    debtId: string,
+    dto: MakePaymentDto,
+    userId: string,
+  ): Promise<DebtWithPayments> {
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
@@ -93,40 +124,53 @@ export class DebtsService {
     try {
       const debt = await queryRunner.manager.findOne(DebtEntity, {
         where: { id: debtId },
-        lock: { mode: "pessimistic_write" },
+        lock: { mode: 'pessimistic_write' },
       });
 
-      if (!debt) throw new NotFoundException("Debt not found");
+      if (!debt) throw new NotFoundException('Debt not found');
       if (debt.status === DebtStatus.PAID)
-        throw new BadRequestException("Debt is already fully paid");
+        throw new BadRequestException("Qarz allaqachon to'liq to'langan");
       if (debt.status === DebtStatus.CANCELLED)
-        throw new BadRequestException("Cannot pay cancelled debt");
+        throw new BadRequestException("Bekor qilingan qarzni to'lab bo'lmaydi");
 
       const remaining = Number(debt.remainingAmount);
-      const payment = dto.amount;
+      const payment = Number(dto.amount);
 
       if (payment <= 0)
-        throw new BadRequestException("Payment amount must be positive");
-      if (payment > remaining)
+        throw new BadRequestException("To'lov summasi musbat bo'lishi kerak");
+      if (payment > remaining + 0.01)
         throw new BadRequestException(
-          `Payment amount (${payment}) exceeds remaining debt (${remaining})`,
+          `To'lov summasi (${payment}) qolgan qarzdan (${remaining}) ko'p`,
         );
 
       const beforeSnapshot = { remainingAmount: remaining, status: debt.status };
 
-      debt.remainingAmount = remaining - payment;
-      if (debt.remainingAmount <= 0.01) {
+      const remainingAfter = Math.max(0, remaining - payment);
+      debt.remainingAmount = remainingAfter;
+      if (remainingAfter <= 0.01) {
         debt.status = DebtStatus.PAID;
         debt.remainingAmount = 0;
       } else {
         debt.status = DebtStatus.PARTIALLY_PAID;
       }
 
-      if (dto.note) {
-        debt.notes = debt.notes ? `${debt.notes}\n${dto.note}` : dto.note;
+      const noteText = dto.note || dto.notes;
+      if (noteText) {
+        debt.notes = debt.notes ? `${debt.notes}\n${noteText}` : noteText;
       }
 
+      const debtPayment = queryRunner.manager.create(DebtPaymentEntity, {
+        debtId: debt.id,
+        amount: payment,
+        paymentMethod: (dto.paymentMethod as unknown as DebtPaymentMethod) ?? DebtPaymentMethod.CASH,
+        note: noteText ?? null,
+        createdById: userId,
+        remainingBefore: remaining,
+        remainingAfter: debt.remainingAmount,
+      });
+
       await queryRunner.manager.save(debt);
+      await queryRunner.manager.save(debtPayment);
       await queryRunner.commitTransaction();
 
       await this.auditLogService.log({
@@ -144,10 +188,12 @@ export class DebtsService {
           debtorName: debt.debtorName,
           debtorPhone: debt.debtorPhone,
           paymentAmount: payment,
+          paymentMethod: dto.paymentMethod,
+          paymentId: debtPayment.id,
         },
       });
 
-      return this.findOne(debt.id);
+      return this.findOneWithPayments(debt.id);
     } catch (error) {
       await queryRunner.rollbackTransaction();
       throw error;
@@ -156,13 +202,23 @@ export class DebtsService {
     }
   }
 
+  // ── getPayments ──────────────────────────────────────────────
+  async getPayments(debtId: string): Promise<DebtPaymentEntity[]> {
+    await this.findOne(debtId);
+    return this.debtPaymentRepository.find({
+      where: { debtId },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  // ── cancel ──────────────────────────────────────────────────
   async cancel(debtId: string, userId: string): Promise<DebtEntity> {
     const debt = await this.debtRepository.findOne({ where: { id: debtId } });
-    if (!debt) throw new NotFoundException("Debt not found");
+    if (!debt) throw new NotFoundException('Debt not found');
     if (debt.status === DebtStatus.PAID)
-      throw new BadRequestException("Cannot cancel paid debt");
+      throw new BadRequestException("To'langan qarzni bekor qilib bo'lmaydi");
     if (debt.status === DebtStatus.CANCELLED)
-      throw new BadRequestException("Debt is already cancelled");
+      throw new BadRequestException('Qarz allaqachon bekor qilingan');
 
     const beforeStatus = debt.status;
     debt.status = DebtStatus.CANCELLED;
@@ -180,20 +236,26 @@ export class DebtsService {
     return this.findOne(debt.id);
   }
 
+  // ── getDebtSummary ───────────────────────────────────────────
   async getDebtSummary() {
     const summary = await this.debtRepository
-      .createQueryBuilder("debt")
-      .select("debt.status", "status")
-      .addSelect("COUNT(*)", "count")
-      .addSelect("SUM(debt.remaining_amount)", "remainingAmount")
-      .addSelect("SUM(debt.original_amount)", "originalAmount")
-      .groupBy("debt.status")
+      .createQueryBuilder('debt')
+      .select('debt.status', 'status')
+      .addSelect('COUNT(*)', 'count')
+      .addSelect('SUM(debt.remaining_amount)', 'remainingAmount')
+      .addSelect('SUM(debt.original_amount)', 'originalAmount')
+      .groupBy('debt.status')
       .getRawMany();
 
     const result = {
-      totalDebts: 0, pendingDebts: 0, partiallyPaidDebts: 0,
-      paidDebts: 0, cancelledDebts: 0,
-      totalRemainingAmount: 0, totalOriginalAmount: 0, totalPaidAmount: 0,
+      totalDebts: 0,
+      pendingDebts: 0,
+      partiallyPaidDebts: 0,
+      paidDebts: 0,
+      cancelledDebts: 0,
+      totalRemainingAmount: 0,
+      totalOriginalAmount: 0,
+      totalPaidAmount: 0,
     };
 
     for (const row of summary) {
@@ -211,222 +273,157 @@ export class DebtsService {
       if (row.status === DebtStatus.CANCELLED) result.cancelledDebts = count;
     }
 
-    result.totalPaidAmount = result.totalOriginalAmount - result.totalRemainingAmount;
+    result.totalPaidAmount =
+      result.totalOriginalAmount - result.totalRemainingAmount;
     return result;
   }
 
-  // ✅ Qarz to'lovi cheki — savdo cheki bilan bir xil dizayn
-  async generateReceipt(debtId: string, res: Response, amount?: number): Promise<void> {
-    const debt = await this.findOne(debtId);
+  // ── generateReceipt — Soddalashtirilgan chek ──────────────────
+  // totalOriginal, paidAmount, currentRemaining — bulk to'lov uchun
+  // frontenddan keladi (umumiy hisob). Agar kelmasa — bitta debt dan hisob
+  async generateReceipt(
+    debtId: string,
+    res: Response,
+    amount?: number,
+    paymentId?: string,
+    totalOriginal?: number,
+    paidAmount?: number,
+    currentRemaining?: number,
+    paymentMethod?: string,
+  ): Promise<void> {
+    const debt = await this.findOneWithPayments(debtId);
 
-    const doc = new PDFDocument({ margin: 40, size: "A4" });
-    res.setHeader("Content-Type", "application/pdf");
+    let targetPayment: DebtPaymentEntity | undefined;
+    if (paymentId) {
+      targetPayment = debt.payments?.find((p) => p.id === paymentId);
+    } else {
+      targetPayment = debt.payments?.[0];
+    }
+
+    // ── Hisob raqamlari: bulk yoki single ──────────────────
+    // Bulk: frontend totalOriginal (=oldingi qoldiq), paidAmount, currentRemaining yuboradi
+    // Single: bitta debt dan — targetPayment.remainingBefore ishlatiladi
+    const isBulk = totalOriginal !== undefined && paidAmount !== undefined && currentRemaining !== undefined;
+
+    // displayOriginal = to'lovdan OLDINGI qoldiq (mijozga ko'rsatiladigan)
+    const displayPaid      = isBulk ? paidAmount!       : (targetPayment ? Number(targetPayment.amount) : (amount ?? 0));
+    const displayRemaining = isBulk ? currentRemaining! : Number(debt.remainingAmount);
+    const displayOriginal  = isBulk
+      ? totalOriginal!   // frontend yuborgan oldingi qoldiq
+      : (targetPayment
+          ? Number(targetPayment.remainingBefore)   // bitta to'lov: remainingBefore
+          : displayRemaining + displayPaid);        // fallback
+    const methodRaw   = isBulk ? (paymentMethod ?? 'CASH') : (targetPayment?.paymentMethod ?? 'CASH');
+    const methodLabel = methodRaw === 'CASH' ? 'Naqd pul' : 'Plastik karta';
+    const isFullyPaid = displayRemaining <= 0.01;
+
+    // ── Receipt size: 80mm thermal-style ──
+    const doc = new PDFDocument({ margin: 0, size: [340, 600] });
+    res.setHeader('Content-Type', 'application/pdf');
     res.setHeader(
-      "Content-Disposition",
+      'Content-Disposition',
       `attachment; filename=qarz-chek-${debtId.slice(0, 8)}.pdf`,
     );
     doc.pipe(res);
 
-    const W = doc.page.width;
-    const L = 40;
-    const R = W - 40;
-    const PW = R - L;
+    const W = 340;
+    const PAD = 20;
+    const CW = W - PAD * 2;
 
     const fmt = (v: number | string) =>
-      "$" + Number(v).toLocaleString("uz-UZ", { minimumFractionDigits: 0, maximumFractionDigits: 4 });
+      '$' + Number(v).toLocaleString('uz-UZ', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 
-    const fmtDate = (d?: Date | string) => {
-      if (!d) return "-";
-      return new Date(d).toLocaleDateString("uz-UZ", {
-        timeZone: "Asia/Tashkent", day: "2-digit", month: "2-digit", year: "numeric",
-      });
+    const fmtDt = (d?: Date | string) => {
+      if (!d) return '-';
+      const dt = new Date(d);
+      const date = dt.toLocaleDateString('uz-UZ', { timeZone: 'Asia/Tashkent', day: '2-digit', month: '2-digit', year: 'numeric' });
+      const time = dt.toLocaleTimeString('uz-UZ', { timeZone: 'Asia/Tashkent', hour: '2-digit', minute: '2-digit' });
+      return `${date}  ${time}`;
     };
 
-    const fmtTime = (d?: Date | string) => {
-      if (!d) return "";
-      return new Date(d).toLocaleTimeString("uz-UZ", {
-        timeZone: "Asia/Tashkent", hour: "2-digit", minute: "2-digit",
-      });
-    };
-
-    const hline = (y: number, lw = 0.5, color = "#cccccc") => {
-      doc.save().moveTo(L, y).lineTo(R, y).lineWidth(lw).strokeColor(color).stroke().restore();
-    };
-
-    const fillRect = (x: number, y: number, w: number, h: number, color: string) => {
+    const fillRect = (x: number, y: number, w: number, h: number, color: string) =>
       doc.save().rect(x, y, w, h).fillColor(color).fill().restore();
+
+    const hline = (y: number, color = '#e2e8f0') =>
+      doc.save().moveTo(PAD, y).lineTo(W - PAD, y).lineWidth(0.5).strokeColor(color).stroke().restore();
+
+    const row = (label: string, value: string, y: number, opts: {
+      labelColor?: string; valueColor?: string; valueBold?: boolean; fontSize?: number; bg?: string;
+    } = {}) => {
+      const { labelColor = '#64748b', valueColor = '#1e293b', valueBold = false, fontSize = 9, bg } = opts;
+      if (bg) fillRect(PAD, y, CW, 20, bg);
+      doc.save().font('Helvetica').fontSize(fontSize).fillColor(labelColor).text(label, PAD + 8, y + 5).restore();
+      doc.save().font(valueBold ? 'Helvetica-Bold' : 'Helvetica').fontSize(fontSize).fillColor(valueColor).text(value, PAD, y + 5, { width: CW - 8, align: 'right' }).restore();
+      return y + 20;
     };
 
-    const cell = (
-      txt: string, x: number, y: number, w: number,
-      opts: { align?: "left" | "right" | "center"; bold?: boolean; size?: number; color?: string } = {}
-    ) => {
-      doc.save()
-        .font(opts.bold ? "Helvetica-Bold" : "Helvetica")
-        .fontSize(opts.size || 9)
-        .fillColor(opts.color || "#1a1a1a")
-        .text(txt, x + 4, y + 3, { width: w - 8, align: opts.align || "left", lineBreak: false })
-        .restore();
-    };
+    // ── HEADER ──────────────────────────────────────────────
+    fillRect(0, 0, W, 52, '#1e3a5f');
+    doc.save().font('Helvetica-Bold').fontSize(16).fillColor('#ffffff')
+      .text('TANIROVKA OPTOM', 0, 12, { width: W, align: 'center' }).restore();
+    doc.save().font('Helvetica').fontSize(8).fillColor('#90cdf4')
+      .text("QARZ TO'LOV CHEKI", 0, 34, { width: W, align: 'center' }).restore();
 
-    // ── HEADER — savdo cheki bilan bir xil ──
-    fillRect(L, 40, PW, 44, "#1e293b");
-    doc.save()
-      .font("Helvetica-Bold").fontSize(18).fillColor("#ffffff")
-      .text("TANIROVKA OPTOM", L, 50, { width: PW, align: "center" })
-      .restore();
+    let y = 60;
 
-    fillRect(L, 84, PW, 20, "#334155");
-    doc.save()
-      .font("Helvetica").fontSize(9).fillColor("#94a3b8")
-      .text("QARZ TO'LOV CHEKI", L, 89, { width: PW, align: "center" })
-      .restore();
-
-    let y = 116;
-
-    // ── Chek raqami + sana ──
-    const now = new Date();
-    doc.save().font("Helvetica-Bold").fontSize(9).fillColor("#64748b")
-      .text("Chek raqami:", L, y)
-      .restore();
-    doc.save().font("Helvetica-Bold").fontSize(10).fillColor("#1e293b")
-      .text(debtId.slice(0, 8).toUpperCase(), L + 70, y)
-      .restore();
-    doc.save().font("Helvetica").fontSize(9).fillColor("#64748b")
-      .text(`${fmtDate(now)}  ${fmtTime(now)}`, L, y, { width: PW, align: "right" })
-      .restore();
-
-    y += 20;
-    hline(y, 0.5, "#e2e8f0");
-    y += 8;
-
-    // ── Mijoz ma'lumotlari — sariq blok (nasiya kabi) ──
-    fillRect(L, y, PW, 52, "#fef3c7");
-    doc.save().font("Helvetica-Bold").fontSize(9).fillColor("#92400e")
-      .text("QARZDOR MA'LUMOTLARI", L + 8, y + 6)
-      .restore();
-    doc.save().font("Helvetica").fontSize(9).fillColor("#78350f")
-      .text(`Mijoz: ${debt.debtorName}`, L + 8, y + 20)
-      .restore();
-    doc.save().font("Helvetica").fontSize(9).fillColor("#78350f")
-      .text(`Tel: ${debt.debtorPhone}`, L + 200, y + 20)
-      .restore();
-    doc.save().font("Helvetica-Bold").fontSize(9).fillColor("#dc2626")
-      .text(
-        `Asl savdo: ${debt.sale ? `#${debt.sale.saleNumber}` : "-"}`,
-        L + 8, y + 34,
-      )
-      .restore();
-    y += 60;
-
-    // ── Savdo ma'lumotlari (agar mavjud bo'lsa) ──
-    if (debt.sale) {
-      hline(y, 0.5, "#e2e8f0");
-      y += 8;
-
-      fillRect(L, y, PW, 18, "#f1f5f9");
-      doc.save().font("Helvetica-Bold").fontSize(9).fillColor("#475569")
-        .text("SAVDO MA'LUMOTLARI", L + 8, y + 4)
-        .restore();
-      y += 18;
-
-      const saleDate = debt.sale.completedAt || debt.sale.createdAt;
-      fillRect(L, y, PW, 18, "#f8fafc");
-      doc.save().font("Helvetica").fontSize(9).fillColor("#64748b")
-        .text(`Savdo raqami: #${debt.sale.saleNumber}`, L + 8, y + 4)
-        .restore();
-      doc.save().font("Helvetica").fontSize(9).fillColor("#64748b")
-        .text(`${fmtDate(saleDate)}  ${fmtTime(saleDate)}`, L, y + 4, { width: PW - 8, align: "right" })
-        .restore();
-      y += 18;
-
-      fillRect(L, y, PW, 18, "#ffffff");
-      doc.save().font("Helvetica").fontSize(9).fillColor("#64748b")
-        .text("Savdo summasi:", L + 8, y + 4)
-        .restore();
-      doc.save().font("Helvetica-Bold").fontSize(9).fillColor("#1e293b")
-        .text(fmt(Number(debt.sale.grandTotal)), L, y + 4, { width: PW - 8, align: "right" })
-        .restore();
-      y += 18;
-
-      doc.save().rect(L, y - 54, PW, 54).lineWidth(0.5).strokeColor("#cbd5e1").stroke().restore();
-      y += 6;
-    }
-
-    // ── Qarz holati jadvali ──
-    const alreadyPaid = Number(debt.originalAmount) - Number(debt.remainingAmount) - (amount ?? 0);
-
-    fillRect(L, y, PW, 18, "#f1f5f9");
-    doc.save().font("Helvetica-Bold").fontSize(9).fillColor("#475569")
-      .text("QARZ HOLATI", L + 8, y + 4)
-      .restore();
+    // ── Sana ──────────────────────────────────────────────
+    const payDate = targetPayment ? new Date(targetPayment.createdAt) : new Date();
+    doc.save().font('Helvetica').fontSize(8).fillColor('#94a3b8')
+      .text(fmtDt(payDate), 0, y, { width: W, align: 'center' }).restore();
     y += 18;
 
-    const rows: { label: string; value: string; bg: string; color: string; bold?: boolean }[] = [
-      { label: "Dastlabki qarz:", value: fmt(Number(debt.originalAmount)), bg: "#f8fafc", color: "#1e293b" },
-      { label: "Avval to'langan:", value: fmt(Math.max(0, alreadyPaid)), bg: "#ffffff", color: "#16a34a" },
-    ];
+    hline(y); y += 10;
 
-    if (amount && amount > 0) {
-      rows.push({
-        label: "Hozir to'landi:",
-        value: fmt(amount),
-        bg: "#f0fdf4",
-        color: "#16a34a",
-        bold: true,
-      });
-    }
+    // ── Mijoz ─────────────────────────────────────────────
+    fillRect(PAD, y, CW, 36, '#f0f9ff');
+    doc.save().font('Helvetica-Bold').fontSize(10).fillColor('#1e3a5f')
+      .text(debt.debtorName, PAD + 8, y + 6, { width: CW - 16 }).restore();
+    doc.save().font('Helvetica').fontSize(8).fillColor('#475569')
+      .text(debt.debtorPhone, PAD + 8, y + 21).restore();
+    doc.save().rect(PAD, y, CW, 36).lineWidth(0.5).strokeColor('#bfdbfe').stroke().restore();
+    y += 44;
 
-    rows.forEach((row) => {
-      fillRect(L, y, PW, 20, row.bg);
-      doc.save().font(row.bold ? "Helvetica-Bold" : "Helvetica").fontSize(9).fillColor("#64748b")
-        .text(row.label, L + 8, y + 5)
-        .restore();
-      doc.save().font(row.bold ? "Helvetica-Bold" : "Helvetica").fontSize(9).fillColor(row.color)
-        .text(row.value, L, y + 5, { width: PW - 8, align: "right" })
-        .restore();
-      hline(y + 20, 0.3, "#e2e8f0");
-      y += 20;
+    hline(y); y += 10;
+
+    // ── TO'LANGAN SUMMA — asosiy katta blok ────────────────
+    fillRect(PAD, y, CW, 56, '#1e3a5f');
+    doc.save().font('Helvetica').fontSize(9).fillColor('#90cdf4')
+      .text("TO'LANDI", PAD + 8, y + 8).restore();
+    doc.save().font('Helvetica-Bold').fontSize(26).fillColor('#ffffff')
+      .text(fmt(displayPaid), PAD, y + 20, { width: CW - 8, align: 'right' }).restore();
+    doc.save().font('Helvetica').fontSize(8).fillColor('#64748b')
+      .text(methodLabel, PAD + 8, y + 42).restore();
+    y += 64;
+
+    hline(y); y += 10;
+
+    // ── 3 qator: Oldingi qoldiq → To'landi → Joriy qoldiq ──
+    // 1) To'lovdan oldingi qoldiq
+    y = row("Oldingi qoldiq:", fmt(displayOriginal), y, { bg: '#f8fafc', labelColor: '#64748b' });
+
+    // 2) To'landi (yashil)
+    y = row("To'landi:", fmt(displayPaid), y, {
+      bg: '#f0fdf4', labelColor: '#16a34a', valueColor: '#16a34a', valueBold: true,
     });
 
-    doc.save().rect(L, y - rows.length * 20 - 18, PW, 18 + rows.length * 20)
-      .lineWidth(0.5).strokeColor("#cbd5e1").stroke().restore();
+    hline(y, '#e2e8f0'); y += 2;
 
-    y += 6;
+    // 3) Joriy qoldiq — eng muhim qator
+    fillRect(PAD, y, CW, 36, isFullyPaid ? '#166534' : '#dc2626');
+    doc.save().font('Helvetica-Bold').fontSize(10).fillColor('#ffffff')
+      .text(isFullyPaid ? "QARZ TO'LANDI!" : 'Joriy qoldiq:', PAD + 8, y + 12).restore();
+    doc.save().font('Helvetica-Bold').fontSize(20).fillColor(isFullyPaid ? '#86efac' : '#fef08a')
+      .text(isFullyPaid ? '$0' : fmt(displayRemaining), PAD, y + 9, { width: CW - 8, align: 'right' }).restore();
+    y += 44;
 
-    // ── Qolgan qarz — grand total kabi ──
-    const statusMap: Record<string, string> = {
-      PENDING: "To'lanmagan",
-      PARTIALLY_PAID: "Qisman to'langan",
-      PAID: "To'liq to'langan",
-      CANCELLED: "Bekor qilingan",
-    };
-
-    const isPaid = debt.status === DebtStatus.PAID;
-    fillRect(L, y, PW, 28, isPaid ? "#166534" : "#1e293b");
-    doc.save().font("Helvetica-Bold").fontSize(12).fillColor("#ffffff")
-      .text(isPaid ? "QARZ TO'LANDI!" : "QOLGAN QARZ:", L + 8, y + 7)
-      .restore();
-    doc.save().font("Helvetica-Bold").fontSize(14).fillColor(isPaid ? "#86efac" : "#fbbf24")
-      .text(
-        isPaid ? statusMap[debt.status] : fmt(Number(debt.remainingAmount)),
-        L, y + 5, { width: PW - 8, align: "right" }
-      )
-      .restore();
-    y += 36;
-
-    // ── FOOTER ──
-    y += 10;
-    hline(y, 0.5, "#e2e8f0");
-    y += 10;
-
-    doc.save().font("Helvetica").fontSize(9).fillColor("#94a3b8")
-      .text("Xaridingiz uchun tashakkur!", L, y, { width: PW, align: "center" })
-      .restore();
-    y += 13;
-    doc.save().font("Helvetica").fontSize(8).fillColor("#cbd5e1")
-      .text("Yana tashrif buyuring • tanirovkaoptom.uz", L, y, { width: PW, align: "center" })
-      .restore();
+    // ── FOOTER ────────────────────────────────────────────
+    y += 12;
+    hline(y); y += 10;
+    doc.save().font('Helvetica').fontSize(8).fillColor('#94a3b8')
+      .text('Xaridingiz uchun tashakkur!', 0, y, { width: W, align: 'center' }).restore();
+    y += 12;
+    doc.save().font('Helvetica').fontSize(7).fillColor('#cbd5e1')
+      .text('tanirovkaoptom.uz', 0, y, { width: W, align: 'center' }).restore();
 
     doc.end();
   }

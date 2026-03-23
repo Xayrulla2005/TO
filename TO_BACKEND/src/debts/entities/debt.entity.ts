@@ -5,9 +5,11 @@ import {
   Entity as Ent2,
   PrimaryGeneratedColumn as PG2,
   OneToOne as OTO2,
+  OneToMany as OTM2,
   JoinColumn as JC2,
   UpdateDateColumn as UDC2,
 } from 'typeorm';
+import { DebtPaymentEntity } from './debt-payment.entity';
 
 export enum DebtStatus {
   PENDING = 'PENDING',
@@ -48,11 +50,16 @@ export class DebtEntity {
   @UDC2({ name: 'updated_at' })
   updatedAt!: Date;
 
-  // Relations
+  // ── Relations ─────────────────────────────────────────────
+
   @OTO2(() => SaleEntity, (sale) => sale.debt)
   @JC2({ name: 'sale_id' })
   sale!: SaleEntity;
 
   @Col2({ type: 'uuid', name: 'sale_id' })
   saleId!: string;
+
+  // ── To'lovlar tarixi ──────────────────────────────────────
+  @OTM2(() => DebtPaymentEntity, (payment) => payment.debt)
+  payments!: DebtPaymentEntity[];
 }

@@ -2,7 +2,7 @@
 import { useState, useEffect, SetStateAction } from 'react';
 import { toast } from '@/shared/ui/Toast';
 import { customersApi, Customer } from '@/features/customer/api/customers.api';
-import { X, Banknote, CreditCard, AlertCircle, CheckCircle2, Search, UserPlus, User, Phone, Check } from 'lucide-react';
+import { X, Banknote, CreditCard, AlertCircle, CheckCircle2, Search, UserPlus, User, Phone, Check, HandCoins } from 'lucide-react';
 
 interface PaymentModalProps {
   isOpen: boolean;
@@ -40,7 +40,6 @@ function fmtCurrency(n: number): string {
   return '$' + new Intl.NumberFormat('uz-UZ', { minimumFractionDigits: 0, maximumFractionDigits: 4 }).format(v);
 }
 
-// +998 XX XXX XX XX formatlovchi funksiya
 function formatPhone(raw: string): string {
   let digits = raw.replace(/\D/g, '');
   if (!digits.startsWith('998')) digits = '998' + digits;
@@ -57,6 +56,7 @@ function formatPhone(raw: string): string {
 export function PaymentModal({ isOpen, onClose, totalAmount, onConfirm, isSubmitting }: PaymentModalProps) {
   const [cashAmount, setCashAmount] = useState('');
   const [cardAmount, setCardAmount] = useState('');
+  const [debtInput, setDebtInput] = useState('');  // ← yangi: nasiya input
 
   const [allCustomers, setAllCustomers] = useState<Customer[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -67,10 +67,39 @@ export function PaymentModal({ isOpen, onClose, totalAmount, onConfirm, isSubmit
 
   const cash = parseInput(cashAmount);
   const card = parseInput(cardAmount);
-  const paid = cash + card;
-  const debtAmount = Math.max(0, totalAmount - paid);
-  const hasDebt = debtAmount >= 1;
-  const isOverpaid = paid > totalAmount + 0.5;
+  const debtManual = parseInput(debtInput);
+
+  // Nasiya: qo'lda kiritilgan yoki avtomatik (qolgan summa)
+  const paidWithoutDebt = cash + card;
+  const autoDebt = Math.max(0, parseFloat((totalAmount - paidWithoutDebt).toFixed(10)));
+
+  // Agar nasiya inputi bo'sh — avtomatik hisoblash
+  const debtAmount = debtInput.trim() === '' ? autoDebt : debtManual;
+
+  const totalPaid = cash + card + debtAmount;
+  const isOverpaid = totalPaid > totalAmount + 0.005;
+  const isUnderpaid = totalPaid < totalAmount - 0.005;
+  const hasDebt = debtAmount >= 0.01;
+  const isFullyPaid = !isOverpaid && !isUnderpaid;
+
+  // Nasiya inputi o'zgarganda cash/card ga ta'sir qilmaymiz,
+  // lekin umumiy summa oshib ketmasligini tekshiramiz
+  const handleDebtChange = (raw: string) => {
+    const clean = raw.replace(/[^\d.\s]/g, '').replace(/\s/g, '');
+    const formatted = fmtInput(clean);
+    setDebtInput(formatted);
+  };
+
+  // Cash o'zgarganda nasiya inputini reset qilamiz (avtomatik hisob)
+  const handleCashChange = (raw: string) => {
+    setCashAmount(fmtInput(raw.replace(/[^\d.\s]/g, '').replace(/\s/g, '')));
+    setDebtInput(''); // nasiya avtomatik hisoblansin
+  };
+
+  const handleCardChange = (raw: string) => {
+    setCardAmount(fmtInput(raw.replace(/[^\d.\s]/g, '').replace(/\s/g, '')));
+    setDebtInput(''); // nasiya avtomatik hisoblansin
+  };
 
   // Qidiruv filtri
   const filtered = (() => {
@@ -85,7 +114,6 @@ export function PaymentModal({ isOpen, onClose, totalAmount, onConfirm, isSubmit
     });
   })();
 
-  // Mijozlarni yuklash
   useEffect(() => {
     if (!isOpen) return;
     customersApi.getAll()
@@ -93,11 +121,11 @@ export function PaymentModal({ isOpen, onClose, totalAmount, onConfirm, isSubmit
       .catch(() => {});
   }, [isOpen]);
 
-  // Reset
   useEffect(() => {
     if (isOpen) {
       setCashAmount(fmtInput(String(totalAmount)));
       setCardAmount('');
+      setDebtInput('');
       setSearchQuery('');
       setSelectedCustomer(null);
       setShowNewForm(false);
@@ -108,6 +136,7 @@ export function PaymentModal({ isOpen, onClose, totalAmount, onConfirm, isSubmit
 
   const handleConfirm = () => {
     if (isOverpaid) { toast.error("To'lov summasi jami summadan oshib ketdi!"); return; }
+    if (isUnderpaid) { toast.error("To'lov summasi yetarli emas!"); return; }
 
     if (hasDebt && !selectedCustomer && !(showNewForm && newName.trim() && newPhone.trim())) {
       toast.error("Qarzga savdo uchun mijoz ma'lumotlari shart!");
@@ -146,35 +175,70 @@ export function PaymentModal({ isOpen, onClose, totalAmount, onConfirm, isSubmit
             <div className="text-3xl font-bold tracking-tight">{fmtCurrency(totalAmount)}</div>
           </div>
 
-          {/* Cash */}
-          <div>
-            <label className="flex items-center gap-1.5 text-sm font-semibold text-gray-700 mb-1.5">
-              <Banknote size={16} className="text-emerald-500" /> Naqd pul
-            </label>
-            <div className="relative">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-semibold">$</span>
-              <input
-                type="text" inputMode="decimal" value={cashAmount}
-                onChange={e => setCashAmount(fmtInput(e.target.value.replace(/[^\d.\s]/g, '').replace(/\s/g, '')))}
-                placeholder="0"
-                className="w-full pl-8 pr-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-emerald-400 text-lg font-semibold transition-colors"
-              />
-            </div>
-          </div>
+          {/* ── 3 ta to'lov usuli ── */}
+          <div className="space-y-3">
 
-          {/* Card */}
-          <div>
-            <label className="flex items-center gap-1.5 text-sm font-semibold text-gray-700 mb-1.5">
-              <CreditCard size={16} className="text-blue-500" /> Karta
-            </label>
-            <div className="relative">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-semibold">$</span>
-              <input
-                type="text" inputMode="decimal" value={cardAmount}
-                onChange={e => setCardAmount(fmtInput(e.target.value.replace(/[^\d.\s]/g, '').replace(/\s/g, '')))}
-                placeholder="0"
-                className="w-full pl-8 pr-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-blue-400 text-lg font-semibold transition-colors"
-              />
+            {/* Naqd */}
+            <div>
+              <label className="flex items-center gap-1.5 text-sm font-semibold text-gray-700 mb-1.5">
+                <Banknote size={16} className="text-emerald-500" /> Naqd pul
+              </label>
+              <div className="relative">
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-semibold">$</span>
+                <input
+                  type="text" inputMode="decimal" value={cashAmount}
+                  onChange={e => handleCashChange(e.target.value)}
+                  placeholder="0"
+                  className="w-full pl-8 pr-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-emerald-400 text-lg font-semibold transition-colors"
+                />
+              </div>
+            </div>
+
+            {/* Karta */}
+            <div>
+              <label className="flex items-center gap-1.5 text-sm font-semibold text-gray-700 mb-1.5">
+                <CreditCard size={16} className="text-blue-500" /> Karta
+              </label>
+              <div className="relative">
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-semibold">$</span>
+                <input
+                  type="text" inputMode="decimal" value={cardAmount}
+                  onChange={e => handleCardChange(e.target.value)}
+                  placeholder="0"
+                  className="w-full pl-8 pr-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-blue-400 text-lg font-semibold transition-colors"
+                />
+              </div>
+            </div>
+
+            {/* Nasiya — yangi */}
+            <div>
+              <label className="flex items-center gap-1.5 text-sm font-semibold text-gray-700 mb-1.5">
+                <HandCoins size={16} className="text-amber-500" /> Nasiya
+                {autoDebt > 0 && debtInput === '' && (
+                  <span className="ml-auto text-xs text-amber-600 font-normal bg-amber-50 px-2 py-0.5 rounded-full">
+                    avtomatik: {fmtCurrency(autoDebt)}
+                  </span>
+                )}
+              </label>
+              <div className="relative">
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-semibold">$</span>
+                <input
+                  type="text" inputMode="decimal"
+                  value={debtInput}
+                  onChange={e => handleDebtChange(e.target.value)}
+                  placeholder={autoDebt > 0 ? fmtCurrency(autoDebt).replace('$', '') : '0'}
+                  className={`w-full pl-8 pr-4 py-3 border-2 rounded-xl focus:outline-none text-lg font-semibold transition-colors ${
+                    hasDebt
+                      ? 'border-amber-300 bg-amber-50/50 focus:border-amber-400 text-amber-800'
+                      : 'border-gray-200 focus:border-amber-400'
+                  }`}
+                />
+              </div>
+              {hasDebt && (
+                <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
+                  <AlertCircle size={11} /> Nasiyaga savdo — mijoz ma'lumotlari kerak
+                </p>
+              )}
             </div>
           </div>
 
@@ -184,26 +248,38 @@ export function PaymentModal({ isOpen, onClose, totalAmount, onConfirm, isSubmit
             hasDebt ? 'bg-amber-50 border-amber-200' :
             'bg-emerald-50 border-emerald-200'
           }`}>
-            <div className="flex justify-between">
-              <span className="text-gray-600">Naqd:</span>
-              <span className="font-semibold">{fmtCurrency(cash)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-600">Karta:</span>
-              <span className="font-semibold">{fmtCurrency(card)}</span>
-            </div>
+            {cash > 0 && (
+              <div className="flex justify-between">
+                <span className="text-gray-600 flex items-center gap-1"><Banknote size={12} className="text-emerald-500" />Naqd:</span>
+                <span className="font-semibold">{fmtCurrency(cash)}</span>
+              </div>
+            )}
+            {card > 0 && (
+              <div className="flex justify-between">
+                <span className="text-gray-600 flex items-center gap-1"><CreditCard size={12} className="text-blue-500" />Karta:</span>
+                <span className="font-semibold">{fmtCurrency(card)}</span>
+              </div>
+            )}
+            {hasDebt && (
+              <div className="flex justify-between">
+                <span className="text-amber-700 flex items-center gap-1"><HandCoins size={12} />Nasiya:</span>
+                <span className="font-semibold text-amber-700">{fmtCurrency(debtAmount)}</span>
+              </div>
+            )}
             <div className="border-t border-gray-200 pt-2 flex justify-between font-bold">
               {isOverpaid ? (
-                <><span className="text-red-600 flex items-center gap-1"><AlertCircle size={14} />Ortiqcha:</span><span className="text-red-600">{fmtCurrency(paid - totalAmount)}</span></>
+                <><span className="text-red-600 flex items-center gap-1"><AlertCircle size={14} />Ortiqcha:</span><span className="text-red-600">{fmtCurrency(totalPaid - totalAmount)}</span></>
+              ) : isUnderpaid ? (
+                <><span className="text-red-500 flex items-center gap-1"><AlertCircle size={14} />Yetishmaydi:</span><span className="text-red-500">{fmtCurrency(totalAmount - totalPaid)}</span></>
               ) : hasDebt ? (
-                <><span className="text-amber-700 flex items-center gap-1"><AlertCircle size={14} />Qarz qoldi:</span><span className="text-amber-700">{fmtCurrency(debtAmount)}</span></>
+                <><span className="text-amber-700 flex items-center gap-1"><CheckCircle2 size={14} />To'liq (nasiya bilan)</span><span className="text-amber-700">✓</span></>
               ) : (
                 <><span className="text-emerald-700 flex items-center gap-1"><CheckCircle2 size={14} />To'liq to'landi</span><span className="text-emerald-700">✓</span></>
               )}
             </div>
           </div>
 
-          {/* Mijoz tanlash */}
+          {/* Mijoz tanlash — nasiya bo'lsa yoki ixtiyoriy */}
           <div className="border-2 border-gray-100 rounded-xl overflow-hidden">
             <div className="px-4 py-3 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
               <span className="text-sm font-semibold text-gray-700 flex items-center gap-1.5">
@@ -239,7 +315,6 @@ export function PaymentModal({ isOpen, onClose, totalAmount, onConfirm, isSubmit
                 </div>
               ) : (
                 <>
-                  {/* Qidiruv */}
                   <div className="relative">
                     <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                     <input
@@ -252,7 +327,6 @@ export function PaymentModal({ isOpen, onClose, totalAmount, onConfirm, isSubmit
                     />
                   </div>
 
-                  {/* Natijalar */}
                   {searchQuery.trim().length > 0 && filtered.length > 0 && (
                     <div className="max-h-48 overflow-y-auto rounded-xl border border-gray-100 divide-y divide-gray-50">
                       {filtered.map(c => (
@@ -273,7 +347,6 @@ export function PaymentModal({ isOpen, onClose, totalAmount, onConfirm, isSubmit
                     </div>
                   )}
 
-                  {/* Topilmadi */}
                   {searchQuery.trim().length > 0 && filtered.length === 0 && !showNewForm && (
                     <div className="flex items-center justify-between px-1 py-1">
                       <span className="text-xs text-gray-400">Mijoz topilmadi</span>
@@ -286,7 +359,6 @@ export function PaymentModal({ isOpen, onClose, totalAmount, onConfirm, isSubmit
                     </div>
                   )}
 
-                  {/* Yangi mijoz mini form */}
                   {showNewForm && (
                     <div className="bg-gray-50 rounded-xl p-3 space-y-2 border border-gray-200">
                       <p className="text-xs font-semibold text-gray-600 flex items-center gap-1">
@@ -299,7 +371,6 @@ export function PaymentModal({ isOpen, onClose, totalAmount, onConfirm, isSubmit
                         placeholder="To'liq ism *"
                         className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-indigo-400"
                       />
-                      {/* ✅ Telefon — +998 avtomatik */}
                       <input
                         type="tel"
                         value={newPhone}
@@ -322,15 +393,7 @@ export function PaymentModal({ isOpen, onClose, totalAmount, onConfirm, isSubmit
                         <button
                           onClick={() => {
                             if (!newName.trim() || !newPhone.trim()) { toast.error('Ism va telefon shart!'); return; }
-                            // ✅ totalDebt: 0 qo'shildi
-                            setSelectedCustomer({
-                              id: '',
-                              name: newName.trim(),
-                              phone: newPhone.trim(),
-                              totalDebt: 0,
-                              createdAt: '',
-                              updatedAt: '',
-                            });
+                            setSelectedCustomer({ id: '', name: newName.trim(), phone: newPhone.trim(), totalDebt: 0, createdAt: '', updatedAt: '' });
                             setShowNewForm(false);
                           }}
                           className="flex-1 py-1.5 text-xs bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-semibold transition-colors"
@@ -356,7 +419,12 @@ export function PaymentModal({ isOpen, onClose, totalAmount, onConfirm, isSubmit
           </button>
           <button
             onClick={handleConfirm}
-            disabled={isSubmitting || isOverpaid || (hasDebt && !selectedCustomer && !(showNewForm && newName.trim() && newPhone.trim()))}
+            disabled={
+              isSubmitting ||
+              isOverpaid ||
+              isUnderpaid ||
+              (hasDebt && !selectedCustomer && !(showNewForm && newName.trim() && newPhone.trim()))
+            }
             className="flex-1 py-3 rounded-xl bg-indigo-600 text-white font-semibold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {isSubmitting ? (

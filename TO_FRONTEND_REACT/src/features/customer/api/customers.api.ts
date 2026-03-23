@@ -6,6 +6,7 @@ export interface Customer {
   phone: string;
   notes?: string;
   totalDebt: number;
+  oldestDebtAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -42,6 +43,17 @@ export interface Payment {
   amount: number;
 }
 
+export interface DebtPayment {
+  id: string;
+  debtId: string;
+  amount: number;
+  paymentMethod: 'CASH' | 'CARD';
+  note?: string | null;
+  remainingBefore: number;
+  remainingAfter: number;
+  createdAt: string;
+}
+
 export interface Debt {
   id: string;
   originalAmount: number;
@@ -49,6 +61,7 @@ export interface Debt {
   status: 'PENDING' | 'PARTIALLY_PAID' | 'PAID' | 'CANCELLED';
   debtorName: string;
   debtorPhone: string;
+  payments?: DebtPayment[];
 }
 
 export interface ReturnItem {
@@ -122,7 +135,6 @@ export const customersApi = {
     return data;
   },
 
-  // ── Qaytarish API ──
   createReturn: async (payload: {
     originalSaleId: string;
     reason?: string;

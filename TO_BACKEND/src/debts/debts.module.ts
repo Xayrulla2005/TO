@@ -1,18 +1,21 @@
-import { Module as Mod3 } from '@nestjs/common';
-import { TypeOrmModule as TO3, TypeOrmModule } from '@nestjs/typeorm';
-import { DebtEntity as DE3, DebtEntity } from './entities/debt.entity';
+// src/debts/debts.module.ts
+import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { DebtEntity } from './entities/debt.entity';
+import { DebtPaymentEntity } from './entities/debt-payment.entity';
 import { DebtsService } from './debts.service';
 import { DebtsController } from './debts.controller';
-import { CommonModule as CM3 } from '../common/common.module';
-import { SaleEntity } from 'src/sale/entities/sale.entity';
+import { CommonModule } from '../common/common.module';
+import { SaleEntity } from '../sale/entities/sale.entity';
 
-@Mod3({
+@Module({
   imports: [
-    TO3.forFeature([DE3]), CM3,
-  TypeOrmModule.forFeature([
+    TypeOrmModule.forFeature([
       DebtEntity,
-      SaleEntity, // ✅ SHART
+      DebtPaymentEntity,
+      SaleEntity,
     ]),
+    CommonModule,
   ],
   providers: [DebtsService],
   controllers: [DebtsController],

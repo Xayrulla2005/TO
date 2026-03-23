@@ -100,11 +100,17 @@ export function SalesPage() {
     },
   });
 
+  // ── Yangi mahsulot TEPAGA qo'shiladi ──
   const addToCart = (product: Product) => {
     setCart((prev) => {
       const existing = prev.find(i => i.product.id === product.id);
-      if (existing) return prev.map(i => i.product.id === product.id ? { ...i, qty: i.qty + 1 } : i);
-      return [...prev, { product, qty: 1, unitPrice: Number(product.salePrice) || 0 }];
+      if (existing) {
+        return prev.map(i =>
+          i.product.id === product.id ? { ...i, qty: i.qty + 1 } : i
+        );
+      }
+      // Yangi mahsulot ro'yxat boshiga (tepaga)
+      return [{ product, qty: 1, unitPrice: Number(product.salePrice) || 0 }, ...prev];
     });
     setAgreedPrice(null);
   };
@@ -116,7 +122,6 @@ export function SalesPage() {
     setAgreedPrice(null);
   };
 
-  // ── Har bir mahsulot narxini alohida o'zgartirish ──
   const updatePrice = (productId: string, price: number) => {
     setCart((prev) =>
       prev.map(i => i.product.id === productId ? { ...i, unitPrice: Math.max(0, price) } : i)
@@ -130,8 +135,6 @@ export function SalesPage() {
   };
 
   const subtotal = parseFloat(cart.reduce((sum, i) => sum + i.qty * i.unitPrice, 0).toFixed(10));
-
-  // originalSubtotal — chegirmasiz asl narxlar bo'yicha jami (foiz hisoblash uchun)
   const originalSubtotal = parseFloat(
     cart.reduce((sum, i) => sum + i.qty * Number(i.product.salePrice), 0).toFixed(10)
   );
@@ -142,7 +145,6 @@ export function SalesPage() {
 
   const totalItems = cart.reduce((sum, i) => sum + i.qty, 0);
 
-  // Chegirma foizi (kelishilgan narx yoki narx o'zgartirishdan)
   const discountPercent = originalSubtotal > 0
     ? parseFloat((((originalSubtotal - grandTotal) / originalSubtotal) * 100).toFixed(2))
     : 0;
@@ -167,7 +169,7 @@ export function SalesPage() {
     <>
       <div className="flex flex-col lg:flex-row gap-4 h-[100dvh] pb-20 lg:pb-0">
 
-        {/* ───── LEFT: Product List ───── */}
+        {/* ── LEFT: Mahsulotlar ── */}
         <div className="flex-1 flex flex-col min-h-0">
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-3 mb-3 sticky top-0 z-10">
             <Input
@@ -182,7 +184,9 @@ export function SalesPage() {
               <button
                 onClick={() => setSelectedCategoryId(null)}
                 className={`px-3 py-1 rounded-full text-xs font-semibold transition-all whitespace-nowrap ${
-                  !selectedCategoryId ? 'bg-indigo-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600'
+                  !selectedCategoryId
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'bg-gray-100 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600'
                 }`}
               >
                 Barchasi
@@ -192,7 +196,9 @@ export function SalesPage() {
                   key={cat.id}
                   onClick={() => setSelectedCategoryId(cat.id)}
                   className={`px-3 py-1 rounded-full text-xs font-semibold transition-all whitespace-nowrap ${
-                    selectedCategoryId === cat.id ? 'bg-indigo-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600'
+                    selectedCategoryId === cat.id
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'bg-gray-100 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600'
                   }`}
                 >
                   {cat.name}
@@ -219,8 +225,10 @@ export function SalesPage() {
                     key={product.id}
                     onClick={() => !isOut && addToCart(product)}
                     className={`flex items-center gap-3 bg-white rounded-xl border px-3 py-2.5 transition-all ${
-                      isOut ? 'opacity-50 cursor-not-allowed border-gray-100'
-                        : inCart ? 'border-indigo-400 shadow-sm cursor-pointer bg-indigo-50/30'
+                      isOut
+                        ? 'opacity-50 cursor-not-allowed border-gray-100'
+                        : inCart
+                        ? 'border-indigo-400 shadow-sm cursor-pointer bg-indigo-50/30'
                         : 'border-gray-100 hover:border-indigo-300 hover:shadow-sm cursor-pointer'
                     }`}
                   >
@@ -259,14 +267,16 @@ export function SalesPage() {
           </div>
         </div>
 
-        {/* ───── RIGHT: Cart (Desktop) ───── */}
+        {/* ── RIGHT: Savat (Desktop) ── */}
         <div className="hidden lg:flex w-[400px] flex-col">
           <Card className="flex flex-col h-full border-indigo-100 shadow-lg">
             <div className="p-4 border-b border-gray-100 flex items-center justify-between">
               <h2 className="font-bold text-base flex items-center gap-2 text-gray-800">
                 <ShoppingCart size={18} className="text-indigo-600" /> Joriy savdo
               </h2>
-              <span className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full text-xs font-bold">{fmtQty(totalItems)} ta</span>
+              <span className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full text-xs font-bold">
+                {fmtQty(totalItems)} ta
+              </span>
             </div>
 
             <div className="flex-1 overflow-y-auto p-3 space-y-2">
@@ -301,15 +311,23 @@ export function SalesPage() {
           </Card>
         </div>
 
-        {/* ───── MOBILE: Floating Cart ───── */}
+        {/* ── MOBILE: Floating Cart ── */}
         <div className="lg:hidden fixed bottom-0 left-0 right-0 z-30 p-3 bg-white border-t border-gray-200 shadow-xl">
           {isCartOpen ? (
-            <div className="fixed inset-0 z-40 bg-black/40 flex flex-col justify-end" onClick={() => setIsCartOpen(false)}>
-              <div className="bg-white rounded-t-2xl max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div
+              className="fixed inset-0 z-40 bg-black/40 flex flex-col justify-end"
+              onClick={() => setIsCartOpen(false)}
+            >
+              <div
+                className="bg-white rounded-t-2xl max-h-[85vh] flex flex-col"
+                onClick={(e) => e.stopPropagation()}
+              >
                 <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
                   <h2 className="font-bold text-base flex items-center gap-2">
                     <ShoppingCart size={18} className="text-indigo-600" /> Joriy savdo
-                    <span className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full text-xs font-bold">{fmtQty(totalItems)} ta</span>
+                    <span className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full text-xs font-bold">
+                      {fmtQty(totalItems)} ta
+                    </span>
                   </h2>
                   <button onClick={() => setIsCartOpen(false)} className="p-1 rounded-lg hover:bg-gray-100">
                     <ChevronUp size={20} className="text-gray-500" />
@@ -353,7 +371,9 @@ export function SalesPage() {
                 <ShoppingCart size={18} />
                 <span className="font-semibold text-sm">Savat</span>
                 {totalItems > 0 && (
-                  <span className="bg-white text-indigo-600 text-xs font-bold px-2 py-0.5 rounded-full">{fmtQty(totalItems)} ta</span>
+                  <span className="bg-white text-indigo-600 text-xs font-bold px-2 py-0.5 rounded-full">
+                    {fmtQty(totalItems)} ta
+                  </span>
                 )}
               </div>
               <span className="font-bold text-sm">{fmt(grandTotal)}</span>
@@ -372,10 +392,16 @@ export function SalesPage() {
 
       {receiptUrl && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl flex flex-col overflow-hidden" style={{ maxHeight: '90vh' }}>
+          <div
+            className="bg-white w-full max-w-md rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+            style={{ maxHeight: '90vh' }}
+          >
             <div className="p-4 border-b flex justify-between items-center">
               <h3 className="font-bold text-gray-900">Chek</h3>
-              <button onClick={() => setReceiptUrl(null)} className="p-1.5 hover:bg-gray-100 rounded-lg">
+              <button
+                onClick={() => setReceiptUrl(null)}
+                className="p-1.5 hover:bg-gray-100 rounded-lg"
+              >
                 <X size={18} className="text-gray-500" />
               </button>
             </div>
@@ -407,7 +433,7 @@ export function SalesPage() {
   );
 }
 
-// ───── CartItemRow ─────
+// ── CartItemRow ──────────────────────────────────────────────
 function CartItemRow({ item, onUpdateQty, onUpdatePrice, onRemove }: {
   item: CartItem;
   onUpdateQty: (id: string, qty: number) => void;
@@ -446,12 +472,14 @@ function CartItemRow({ item, onUpdateQty, onUpdatePrice, onRemove }: {
             )}
           </div>
         </div>
-        <button onClick={() => onRemove(item.product.id)} className="p-1 text-gray-300 hover:text-red-500 flex-shrink-0">
+        <button
+          onClick={() => onRemove(item.product.id)}
+          className="p-1 text-gray-300 hover:text-red-500 flex-shrink-0"
+        >
           <Trash2 size={15} />
         </button>
       </div>
 
-      {/* Soni va Narx qatori */}
       <div className="flex items-center gap-2 flex-wrap">
         {/* Soni */}
         <div className="flex items-center gap-1">
@@ -478,7 +506,7 @@ function CartItemRow({ item, onUpdateQty, onUpdatePrice, onRemove }: {
 
         <span className="text-gray-300 text-xs">×</span>
 
-        {/* Narx — tahrirlash mumkin */}
+        {/* Narx */}
         <div className="flex items-center gap-1">
           <span className="text-xs text-gray-400">Narx:</span>
           <div className="relative">
@@ -512,7 +540,6 @@ function CartItemRow({ item, onUpdateQty, onUpdatePrice, onRemove }: {
           </div>
         </div>
 
-        {/* Jami narx */}
         <p className="font-bold text-indigo-600 text-sm flex-shrink-0 ml-auto">
           {fmt(item.qty * item.unitPrice)}
         </p>
@@ -521,8 +548,8 @@ function CartItemRow({ item, onUpdateQty, onUpdatePrice, onRemove }: {
   );
 }
 
-// ───── CartFooter ─────
-function CartFooter({ subtotal, originalSubtotal, cart, onPay, agreedPrice, onAgreedPriceChange }: {
+// ── CartFooter ──────────────────────────────────────────────
+function CartFooter({ subtotal, originalSubtotal, cart, onPay, agreedPrice, onAgreedPriceChange, discountPercent }: {
   subtotal: number;
   originalSubtotal: number;
   cart: CartItem[];
@@ -533,14 +560,12 @@ function CartFooter({ subtotal, originalSubtotal, cart, onPay, agreedPrice, onAg
 }) {
   const displayTotal = agreedPrice !== null && agreedPrice !== '' ? Number(agreedPrice) : subtotal;
 
-  // Kelishilgan narx bo'yicha chegirma foizi
   const agreedDiscountPercent = originalSubtotal > 0 && displayTotal < originalSubtotal
     ? parseFloat(((1 - displayTotal / originalSubtotal) * 100).toFixed(2))
     : 0;
 
   return (
     <div className="p-3 border-t border-gray-100 bg-white space-y-2">
-      {/* Asl narxlar jami */}
       {originalSubtotal !== subtotal && (
         <div className="flex justify-between text-xs text-gray-400">
           <span>Asl narx jami</span>
@@ -548,7 +573,6 @@ function CartFooter({ subtotal, originalSubtotal, cart, onPay, agreedPrice, onAg
         </div>
       )}
 
-      {/* Mahsulot narxi o'zgartirishidan chegirma */}
       {subtotal < originalSubtotal && (
         <div className="flex justify-between text-xs text-green-600">
           <span>Narx chegirmasi</span>
@@ -561,7 +585,6 @@ function CartFooter({ subtotal, originalSubtotal, cart, onPay, agreedPrice, onAg
         <span>{fmt(subtotal)}</span>
       </div>
 
-      {/* Kelishilgan narx */}
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs text-gray-500 whitespace-nowrap">Kelishilgan narx</span>
         <div className="relative">
@@ -587,7 +610,6 @@ function CartFooter({ subtotal, originalSubtotal, cart, onPay, agreedPrice, onAg
         </div>
       </div>
 
-      {/* Kelishilgan narxdan chegirma foizini ko'rsatish */}
       {agreedDiscountPercent > 0 && (
         <div className="flex justify-between text-xs text-orange-600 bg-orange-50 rounded-lg px-2 py-1">
           <span>Kelishilgan chegirma</span>
