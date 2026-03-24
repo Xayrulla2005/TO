@@ -1,8 +1,11 @@
-// src/features/sales/PaymentModal.tsx
-import { useState, useEffect, SetStateAction } from 'react';
+// Nasiya input olib tashlandi — avtomatik hisoblanadi (qolgan summa)
+import { useState, useEffect } from 'react';
 import { toast } from '@/shared/ui/Toast';
 import { customersApi, Customer } from '@/features/customer/api/customers.api';
-import { X, Banknote, CreditCard, AlertCircle, CheckCircle2, Search, UserPlus, User, Phone, Check, HandCoins } from 'lucide-react';
+import {
+  X, Banknote, CreditCard, AlertCircle, CheckCircle2,
+  Search, UserPlus, User, Phone, Check, Clock,
+} from 'lucide-react';
 
 interface PaymentModalProps {
   isOpen: boolean;
@@ -32,11 +35,13 @@ function fmtInput(val: string): string {
 }
 
 function parseInput(val: string): number {
-  return parseFloat(val.replace(/\s/g, '')) || 0;
+  const n = parseFloat(val.replace(/\s/g, ''));
+  return isNaN(n) ? 0 : n;
 }
 
 function fmtCurrency(n: number): string {
-  const v = parseFloat(n.toFixed(4));
+  const safe = isNaN(n) ? 0 : n;
+  const v = parseFloat(safe.toFixed(4));
   return '$' + new Intl.NumberFormat('uz-UZ', { minimumFractionDigits: 0, maximumFractionDigits: 4 }).format(v);
 }
 
@@ -53,10 +58,15 @@ function formatPhone(raw: string): string {
   return f;
 }
 
-export function PaymentModal({ isOpen, onClose, totalAmount, onConfirm, isSubmitting }: PaymentModalProps) {
+export function PaymentModal({
+  isOpen,
+  onClose,
+  totalAmount,
+  onConfirm,
+  isSubmitting,
+}: PaymentModalProps) {
   const [cashAmount, setCashAmount] = useState('');
   const [cardAmount, setCardAmount] = useState('');
-  const [debtInput, setDebtInput] = useState('');  // ← yangi: nasiya input
 
   const [allCustomers, setAllCustomers] = useState<Customer[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -67,45 +77,27 @@ export function PaymentModal({ isOpen, onClose, totalAmount, onConfirm, isSubmit
 
   const cash = parseInput(cashAmount);
   const card = parseInput(cardAmount);
-  const debtManual = parseInput(debtInput);
 
-  // Nasiya: qo'lda kiritilgan yoki avtomatik (qolgan summa)
-  const paidWithoutDebt = cash + card;
-  const autoDebt = Math.max(0, parseFloat((totalAmount - paidWithoutDebt).toFixed(10)));
-
-  // Agar nasiya inputi bo'sh — avtomatik hisoblash
-  const debtAmount = debtInput.trim() === '' ? autoDebt : debtManual;
-
-  const totalPaid = cash + card + debtAmount;
-  const isOverpaid = totalPaid > totalAmount + 0.005;
-  const isUnderpaid = totalPaid < totalAmount - 0.005;
+  // Nasiya = jami - (naqd + karta), never negative — kept for submission logic
+  const rawDebt = parseFloat((totalAmount - cash - card).toFixed(10));
+  const debtAmount = Math.max(0, isNaN(rawDebt) ? 0 : rawDebt);
   const hasDebt = debtAmount >= 0.01;
-  const isFullyPaid = !isOverpaid && !isUnderpaid;
 
-  // Nasiya inputi o'zgarganda cash/card ga ta'sir qilmaymiz,
-  // lekin umumiy summa oshib ketmasligini tekshiramiz
-  const handleDebtChange = (raw: string) => {
-    const clean = raw.replace(/[^\d.\s]/g, '').replace(/\s/g, '');
-    const formatted = fmtInput(clean);
-    setDebtInput(formatted);
-  };
+  // Overpaid: cash+card exceeds total by more than rounding tolerance
+  const isOverpaid = (cash + card) > totalAmount + 0.005;
 
-  // Cash o'zgarganda nasiya inputini reset qilamiz (avtomatik hisob)
   const handleCashChange = (raw: string) => {
     setCashAmount(fmtInput(raw.replace(/[^\d.\s]/g, '').replace(/\s/g, '')));
-    setDebtInput(''); // nasiya avtomatik hisoblansin
   };
 
   const handleCardChange = (raw: string) => {
     setCardAmount(fmtInput(raw.replace(/[^\d.\s]/g, '').replace(/\s/g, '')));
-    setDebtInput(''); // nasiya avtomatik hisoblansin
   };
 
-  // Qidiruv filtri
   const filtered = (() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return [];
-    return allCustomers.filter(c => {
+    return allCustomers.filter((c) => {
       const nameMatch = c.name.toLowerCase().includes(q);
       const phoneDigits = c.phone.replace(/\D/g, '');
       const queryDigits = q.replace(/\D/g, '');
@@ -116,16 +108,16 @@ export function PaymentModal({ isOpen, onClose, totalAmount, onConfirm, isSubmit
 
   useEffect(() => {
     if (!isOpen) return;
-    customersApi.getAll()
-      .then((list: SetStateAction<Customer[]>) => setAllCustomers(list))
+    customersApi
+      .getAll()
+      .then((list) => setAllCustomers(list))
       .catch(() => {});
   }, [isOpen]);
 
   useEffect(() => {
     if (isOpen) {
-      setCashAmount(fmtInput(String(totalAmount)));
+      setCashAmount('');
       setCardAmount('');
-      setDebtInput('');
       setSearchQuery('');
       setSelectedCustomer(null);
       setShowNewForm(false);
@@ -134,11 +126,18 @@ export function PaymentModal({ isOpen, onClose, totalAmount, onConfirm, isSubmit
     }
   }, [isOpen, totalAmount]);
 
-  const handleConfirm = () => {
-    if (isOverpaid) { toast.error("To'lov summasi jami summadan oshib ketdi!"); return; }
-    if (isUnderpaid) { toast.error("To'lov summasi yetarli emas!"); return; }
+  // Unified customer validity check (used in both disabled prop and handleConfirm)
+  const customerInfoValid =
+    !hasDebt ||
+    !!selectedCustomer ||
+    (showNewForm && newName.trim().length > 0 && newPhone.trim().length > 0);
 
-    if (hasDebt && !selectedCustomer && !(showNewForm && newName.trim() && newPhone.trim())) {
+  const handleConfirm = () => {
+    if (isOverpaid) {
+      toast.error("To'lov summasi jami summadan oshib ketdi!");
+      return;
+    }
+    if (!customerInfoValid) {
       toast.error("Qarzga savdo uchun mijoz ma'lumotlari shart!");
       return;
     }
@@ -175,7 +174,7 @@ export function PaymentModal({ isOpen, onClose, totalAmount, onConfirm, isSubmit
             <div className="text-3xl font-bold tracking-tight">{fmtCurrency(totalAmount)}</div>
           </div>
 
-          {/* ── 3 ta to'lov usuli ── */}
+          {/* Payment inputs */}
           <div className="space-y-3">
 
             {/* Naqd */}
@@ -186,8 +185,10 @@ export function PaymentModal({ isOpen, onClose, totalAmount, onConfirm, isSubmit
               <div className="relative">
                 <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-semibold">$</span>
                 <input
-                  type="text" inputMode="decimal" value={cashAmount}
-                  onChange={e => handleCashChange(e.target.value)}
+                  type="text"
+                  inputMode="decimal"
+                  value={cashAmount}
+                  onChange={(e) => handleCashChange(e.target.value)}
                   placeholder="0"
                   className="w-full pl-8 pr-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-emerald-400 text-lg font-semibold transition-colors"
                 />
@@ -202,96 +203,95 @@ export function PaymentModal({ isOpen, onClose, totalAmount, onConfirm, isSubmit
               <div className="relative">
                 <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-semibold">$</span>
                 <input
-                  type="text" inputMode="decimal" value={cardAmount}
-                  onChange={e => handleCardChange(e.target.value)}
+                  type="text"
+                  inputMode="decimal"
+                  value={cardAmount}
+                  onChange={(e) => handleCardChange(e.target.value)}
                   placeholder="0"
                   className="w-full pl-8 pr-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-blue-400 text-lg font-semibold transition-colors"
                 />
               </div>
             </div>
-
-            {/* Nasiya — yangi */}
-            <div>
-              <label className="flex items-center gap-1.5 text-sm font-semibold text-gray-700 mb-1.5">
-                <HandCoins size={16} className="text-amber-500" /> Nasiya
-                {autoDebt > 0 && debtInput === '' && (
-                  <span className="ml-auto text-xs text-amber-600 font-normal bg-amber-50 px-2 py-0.5 rounded-full">
-                    avtomatik: {fmtCurrency(autoDebt)}
-                  </span>
-                )}
-              </label>
-              <div className="relative">
-                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-semibold">$</span>
-                <input
-                  type="text" inputMode="decimal"
-                  value={debtInput}
-                  onChange={e => handleDebtChange(e.target.value)}
-                  placeholder={autoDebt > 0 ? fmtCurrency(autoDebt).replace('$', '') : '0'}
-                  className={`w-full pl-8 pr-4 py-3 border-2 rounded-xl focus:outline-none text-lg font-semibold transition-colors ${
-                    hasDebt
-                      ? 'border-amber-300 bg-amber-50/50 focus:border-amber-400 text-amber-800'
-                      : 'border-gray-200 focus:border-amber-400'
-                  }`}
-                />
-              </div>
-              {hasDebt && (
-                <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
-                  <AlertCircle size={11} /> Nasiyaga savdo — mijoz ma'lumotlari kerak
-                </p>
-              )}
-            </div>
           </div>
 
           {/* Summary */}
-          <div className={`rounded-xl p-4 space-y-2 text-sm border-2 ${
-            isOverpaid ? 'bg-red-50 border-red-200' :
-            hasDebt ? 'bg-amber-50 border-amber-200' :
-            'bg-emerald-50 border-emerald-200'
-          }`}>
+          <div
+            className={`rounded-xl p-4 space-y-2 text-sm border-2 ${
+              isOverpaid
+                ? 'bg-red-50 border-red-200'
+                : hasDebt
+                ? 'bg-amber-50 border-amber-200'
+                : 'bg-emerald-50 border-emerald-200'
+            }`}
+          >
+            {/* Cash row */}
             {cash > 0 && (
               <div className="flex justify-between">
-                <span className="text-gray-600 flex items-center gap-1"><Banknote size={12} className="text-emerald-500" />Naqd:</span>
+                <span className="text-gray-600 flex items-center gap-1">
+                  <Banknote size={12} className="text-emerald-500" />Naqd:
+                </span>
                 <span className="font-semibold">{fmtCurrency(cash)}</span>
               </div>
             )}
+
+            {/* Card row */}
             {card > 0 && (
               <div className="flex justify-between">
-                <span className="text-gray-600 flex items-center gap-1"><CreditCard size={12} className="text-blue-500" />Karta:</span>
+                <span className="text-gray-600 flex items-center gap-1">
+                  <CreditCard size={12} className="text-blue-500" />Karta:
+                </span>
                 <span className="font-semibold">{fmtCurrency(card)}</span>
               </div>
             )}
-            {hasDebt && (
+
+            {/* Remaining debt row — current sale only */}
+            {hasDebt && !isOverpaid && (
               <div className="flex justify-between">
-                <span className="text-amber-700 flex items-center gap-1"><HandCoins size={12} />Nasiya:</span>
+                <span className="text-amber-700 flex items-center gap-1">
+                  <Clock size={12} className="text-amber-500" />Qoldiq (nasiya):
+                </span>
                 <span className="font-semibold text-amber-700">{fmtCurrency(debtAmount)}</span>
               </div>
             )}
+
+            {/* Status row */}
             <div className="border-t border-gray-200 pt-2 flex justify-between font-bold">
               {isOverpaid ? (
-                <><span className="text-red-600 flex items-center gap-1"><AlertCircle size={14} />Ortiqcha:</span><span className="text-red-600">{fmtCurrency(totalPaid - totalAmount)}</span></>
-              ) : isUnderpaid ? (
-                <><span className="text-red-500 flex items-center gap-1"><AlertCircle size={14} />Yetishmaydi:</span><span className="text-red-500">{fmtCurrency(totalAmount - totalPaid)}</span></>
-              ) : hasDebt ? (
-                <><span className="text-amber-700 flex items-center gap-1"><CheckCircle2 size={14} />To'liq (nasiya bilan)</span><span className="text-amber-700">✓</span></>
+                <>
+                  <span className="text-red-600 flex items-center gap-1">
+                    <AlertCircle size={14} />Ortiqcha:
+                  </span>
+                  <span className="text-red-600">{fmtCurrency(cash + card - totalAmount)}</span>
+                </>
               ) : (
-                <><span className="text-emerald-700 flex items-center gap-1"><CheckCircle2 size={14} />To'liq to'landi</span><span className="text-emerald-700">✓</span></>
+                <>
+                  <span className={`flex items-center gap-1 ${hasDebt ? 'text-amber-700' : 'text-emerald-700'}`}>
+                    <CheckCircle2 size={14} />To'lov qabul qilindi
+                  </span>
+                  <span className={hasDebt ? 'text-amber-700' : 'text-emerald-700'}>✓</span>
+                </>
               )}
             </div>
           </div>
 
-          {/* Mijoz tanlash — nasiya bo'lsa yoki ixtiyoriy */}
+          {/* Mijoz tanlash */}
           <div className="border-2 border-gray-100 rounded-xl overflow-hidden">
             <div className="px-4 py-3 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
               <span className="text-sm font-semibold text-gray-700 flex items-center gap-1.5">
                 <User size={15} className="text-indigo-500" />
                 Mijoz
-                {hasDebt
-                  ? <span className="text-xs text-red-400 font-normal ml-1">* majburiy</span>
-                  : <span className="text-xs text-gray-400 font-normal ml-1">(ixtiyoriy)</span>}
+                {hasDebt ? (
+                  <span className="text-xs text-red-400 font-normal ml-1">* majburiy</span>
+                ) : (
+                  <span className="text-xs text-gray-400 font-normal ml-1">(ixtiyoriy)</span>
+                )}
               </span>
               {selectedCustomer && (
                 <button
-                  onClick={() => { setSelectedCustomer(null); setSearchQuery(''); }}
+                  onClick={() => {
+                    setSelectedCustomer(null);
+                    setSearchQuery('');
+                  }}
                   className="text-xs text-gray-400 hover:text-red-500 transition-colors"
                 >
                   O'zgartirish
@@ -316,11 +316,17 @@ export function PaymentModal({ isOpen, onClose, totalAmount, onConfirm, isSubmit
               ) : (
                 <>
                   <div className="relative">
-                    <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                    <Search
+                      size={15}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
+                    />
                     <input
                       type="text"
                       value={searchQuery}
-                      onChange={e => { setSearchQuery(e.target.value); setShowNewForm(false); }}
+                      onChange={(e) => {
+                        setSearchQuery(e.target.value);
+                        setShowNewForm(false);
+                      }}
                       placeholder="Ism yoki telefon bo'yicha..."
                       autoComplete="off"
                       className="w-full pl-9 pr-4 py-2.5 border-2 border-gray-200 rounded-xl text-sm focus:outline-none focus:border-indigo-400 transition-colors"
@@ -329,10 +335,14 @@ export function PaymentModal({ isOpen, onClose, totalAmount, onConfirm, isSubmit
 
                   {searchQuery.trim().length > 0 && filtered.length > 0 && (
                     <div className="max-h-48 overflow-y-auto rounded-xl border border-gray-100 divide-y divide-gray-50">
-                      {filtered.map(c => (
+                      {filtered.map((c) => (
                         <button
                           key={c.id}
-                          onClick={() => { setSelectedCustomer(c); setShowNewForm(false); setSearchQuery(''); }}
+                          onClick={() => {
+                            setSelectedCustomer(c);
+                            setShowNewForm(false);
+                            setSearchQuery('');
+                          }}
                           className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-indigo-50 transition-colors text-left"
                         >
                           <div className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
@@ -351,7 +361,11 @@ export function PaymentModal({ isOpen, onClose, totalAmount, onConfirm, isSubmit
                     <div className="flex items-center justify-between px-1 py-1">
                       <span className="text-xs text-gray-400">Mijoz topilmadi</span>
                       <button
-                        onClick={() => { setShowNewForm(true); setNewName(searchQuery); setNewPhone('+998 '); }}
+                        onClick={() => {
+                          setShowNewForm(true);
+                          setNewName(searchQuery);
+                          setNewPhone('+998 ');
+                        }}
                         className="flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors"
                       >
                         <UserPlus size={13} /> Yangi mijoz
@@ -367,33 +381,55 @@ export function PaymentModal({ isOpen, onClose, totalAmount, onConfirm, isSubmit
                       <input
                         type="text"
                         value={newName}
-                        onChange={e => setNewName(e.target.value.charAt(0).toUpperCase() + e.target.value.slice(1))}
+                        onChange={(e) =>
+                          setNewName(
+                            e.target.value.charAt(0).toUpperCase() + e.target.value.slice(1),
+                          )
+                        }
                         placeholder="To'liq ism *"
                         className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-indigo-400"
                       />
                       <input
                         type="tel"
                         value={newPhone}
-                        onChange={e => {
+                        onChange={(e) => {
                           const raw = e.target.value;
-                          if (raw === '' || raw === '+') { setNewPhone('+998 '); return; }
+                          if (raw === '' || raw === '+') {
+                            setNewPhone('+998 ');
+                            return;
+                          }
                           setNewPhone(formatPhone(raw));
                         }}
-                        onFocus={() => { if (!newPhone) setNewPhone('+998 '); }}
+                        onFocus={() => {
+                          if (!newPhone) setNewPhone('+998 ');
+                        }}
                         placeholder="+998 90 123 45 67"
                         className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-indigo-400"
                       />
                       <div className="flex gap-2">
                         <button
-                          onClick={() => { setShowNewForm(false); setSearchQuery(''); }}
+                          onClick={() => {
+                            setShowNewForm(false);
+                            setSearchQuery('');
+                          }}
                           className="flex-1 py-1.5 text-xs border border-gray-200 rounded-lg text-gray-500 hover:bg-gray-100 transition-colors"
                         >
                           Bekor
                         </button>
                         <button
                           onClick={() => {
-                            if (!newName.trim() || !newPhone.trim()) { toast.error('Ism va telefon shart!'); return; }
-                            setSelectedCustomer({ id: '', name: newName.trim(), phone: newPhone.trim(), totalDebt: 0, createdAt: '', updatedAt: '' });
+                            if (!newName.trim() || !newPhone.trim()) {
+                              toast.error('Ism va telefon shart!');
+                              return;
+                            }
+                            setSelectedCustomer({
+                              id: '',
+                              name: newName.trim(),
+                              phone: newPhone.trim(),
+                              totalDebt: 0,
+                              createdAt: '',
+                              updatedAt: '',
+                            });
                             setShowNewForm(false);
                           }}
                           className="flex-1 py-1.5 text-xs bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-semibold transition-colors"
@@ -419,12 +455,7 @@ export function PaymentModal({ isOpen, onClose, totalAmount, onConfirm, isSubmit
           </button>
           <button
             onClick={handleConfirm}
-            disabled={
-              isSubmitting ||
-              isOverpaid ||
-              isUnderpaid ||
-              (hasDebt && !selectedCustomer && !(showNewForm && newName.trim() && newPhone.trim()))
-            }
+            disabled={isSubmitting || isOverpaid || !customerInfoValid}
             className="flex-1 py-3 rounded-xl bg-indigo-600 text-white font-semibold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {isSubmitting ? (
@@ -432,7 +463,9 @@ export function PaymentModal({ isOpen, onClose, totalAmount, onConfirm, isSubmit
                 <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                 Saqlanmoqda...
               </span>
-            ) : 'Tasdiqlash'}
+            ) : (
+              'Tasdiqlash'
+            )}
           </button>
         </div>
       </div>

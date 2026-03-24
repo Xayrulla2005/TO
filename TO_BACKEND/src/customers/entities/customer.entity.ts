@@ -30,4 +30,5 @@ export class CustomerEntity {
 
   @OneToMany(() => SaleEntity, (sale) => sale.customer)
   sales?: SaleEntity[];
+  totalDebt: number;
 }

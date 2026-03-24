@@ -18,12 +18,9 @@ interface CompleteSalePayload {
     amount: number;
     notes?: string;
   }[];
-  // Mavjud mijoz ID si
   customerId?: string;
-  // Yangi mijoz
   customerName?: string;
   customerPhone?: string;
-  // Backward compat
   debtorName?: string;
   debtorPhone?: string;
   debtDueDate?: string;
@@ -31,18 +28,37 @@ interface CompleteSalePayload {
   agreedTotal?: number;
 }
 
+export interface DebtSummary {
+  previousDebt: number;
+  currentSaleDebt: number;
+  totalDebtAfter: number;
+}
+
+export interface CompletedSale {
+  id: string;
+  saleNumber: string;
+  grandTotal: number;
+  subtotal: number;
+  totalDiscount: number;
+  status: string;
+  completedAt?: string;
+  createdAt: string;
+  debtSummary?: DebtSummary;
+  [key: string]: unknown;
+}
+
 export const salesApi = {
-  create: async (payload: CreateSalePayload) => {
+  create: async (payload: CreateSalePayload): Promise<{ id: string; [key: string]: unknown }> => {
     const { data } = await api.post('/sales', payload);
     return data;
   },
 
-  complete: async (saleId: string, payload: CompleteSalePayload) => {
+  complete: async (saleId: string, payload: CompleteSalePayload): Promise<CompletedSale> => {
     const { data } = await api.post(`/sales/${saleId}/complete`, payload);
     return data;
   },
 
-  downloadReceipt: async (saleId: string) => {
+  downloadReceipt: async (saleId: string): Promise<Blob> => {
     const { data } = await api.get(`/sales/${saleId}/receipt`, { responseType: 'blob' });
     return data;
   },

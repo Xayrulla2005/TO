@@ -1,15 +1,23 @@
-import { useState } from 'react';
-import { useQuery, useMutation } from '@tanstack/react-query';
-import { productsApi } from '../features/products/api/product.api';
-import { salesApi } from '../features/sales/api/sales.api';
-import { categoriesApi } from '../features/categories/api/categories.api';
-import { Input } from '../shared/ui/Input';
-import { Button } from '../shared/ui/Button';
-import { Card } from '../shared/ui/Card';
-import { toast } from '../shared/ui/Toast';
-import { Search, ShoppingCart, Trash2, Package, X, ChevronUp, AlertTriangle } from 'lucide-react';
-import { Product } from '../shared/types/product';
-import { PaymentModal, PaymentData } from '../features/sales/PaymentModal';
+import { useState, useEffect, useRef } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { productsApi } from "../features/products/api/product.api";
+import { salesApi, CompletedSale } from "../features/sales/api/sales.api";
+import { categoriesApi } from "../features/categories/api/categories.api";
+import { Input } from "../shared/ui/Input";
+import { Button } from "../shared/ui/Button";
+import { Card } from "../shared/ui/Card";
+import { toast } from "../shared/ui/Toast";
+import {
+  Search,
+  ShoppingCart,
+  Trash2,
+  Package,
+  X,
+  ChevronUp,
+  AlertTriangle,
+} from "lucide-react";
+import { Product } from "../shared/types/product";
+import { PaymentModal, PaymentData } from "../features/sales/PaymentModal";
 
 interface CartItem {
   product: Product;
@@ -18,15 +26,22 @@ interface CartItem {
 }
 
 function fmt(val: number | string | null | undefined): string {
-  const n = Number(val) || 0;
-  const formatted = n % 1 === 0
-    ? n.toLocaleString('uz-UZ')
-    : parseFloat(n.toFixed(4)).toLocaleString('uz-UZ', { minimumFractionDigits: 0, maximumFractionDigits: 4 });
-  return '$' + formatted;
+  const n = Number(val);
+  if (isNaN(n)) return "$0";
+  const formatted =
+    n % 1 === 0
+      ? n.toLocaleString("uz-UZ")
+      : parseFloat(n.toFixed(4)).toLocaleString("uz-UZ", {
+          minimumFractionDigits: 0,
+          maximumFractionDigits: 4,
+        });
+  return "$" + formatted;
 }
 
 function fmtQty(val: number | string | null | undefined): string {
-  return String(parseFloat(parseFloat(String(val || 0)).toFixed(4)));
+  const n = parseFloat(String(val || 0));
+  if (isNaN(n)) return "0";
+  return String(parseFloat(n.toFixed(4)));
 }
 
 function sortProducts(list: Product[]): Product[] {
@@ -35,33 +50,104 @@ function sortProducts(list: Product[]): Product[] {
     const bNum = /^\d/.test(b.name);
     if (aNum && bNum) {
       const diff = parseFloat(a.name) - parseFloat(b.name);
-      return diff !== 0 ? diff : a.name.localeCompare(b.name, 'uz');
+      return diff !== 0 ? diff : a.name.localeCompare(b.name, "uz");
     }
     if (aNum && !bNum) return -1;
     if (!aNum && bNum) return 1;
-    return a.name.localeCompare(b.name, 'uz');
+    return a.name.localeCompare(b.name, "uz");
   });
 }
 
+// Safe float operation: round to 10 decimal places to avoid JS float drift
+function safeAdd(a: number, b: number): number {
+  return parseFloat((a + b).toFixed(10));
+}
+
+
+function safeMultiply(a: number, b: number): number {
+  return parseFloat((a * b).toFixed(10));
+}
+
 export function SalesPage() {
-  const [search, setSearch] = useState('');
-  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(
+    null,
+  );
   const [cart, setCart] = useState<CartItem[]>([]);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
-  const [completedSale, setCompletedSale] = useState<any>(null);
+  const [completedSale, setCompletedSale] = useState<CompletedSale | null>(
+    null,
+  );
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [agreedPrice, setAgreedPrice] = useState<number | string | null>(null);
 
+  // Keep a ref to the current receiptUrl so we can revoke it even if state has moved on
+  const receiptUrlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    receiptUrlRef.current = receiptUrl;
+  }, [receiptUrl]);
+
+  // Revoke object URL on unmount to prevent memory leak
+  useEffect(() => {
+    return () => {
+      if (receiptUrlRef.current) {
+        URL.revokeObjectURL(receiptUrlRef.current);
+      }
+    };
+  }, []);
+
+  const closeReceipt = () => {
+    if (receiptUrl) {
+      // Small delay so iframe/download has time to finish
+      setTimeout(() => {
+        URL.revokeObjectURL(receiptUrl);
+      }, 150);
+    }
+    setReceiptUrl(null);
+  };
+
   const { data: products, isLoading: productsLoading } = useQuery({
-    queryKey: ['products'],
+    queryKey: ["products"],
     queryFn: productsApi.getAll,
   });
 
   const { data: categories, isLoading: categoriesLoading } = useQuery({
-    queryKey: ['categories'],
+    queryKey: ["categories"],
     queryFn: categoriesApi.getAll,
   });
+
+  // Derive subtotal/grandTotal at render time so mutationFn closure always reads fresh values
+  const subtotal = cart.reduce(
+    (sum, i) => safeAdd(sum, safeMultiply(i.qty, i.unitPrice)),
+    0,
+  );
+  const originalSubtotal = cart.reduce(
+    (sum, i) =>
+      safeAdd(sum, safeMultiply(i.qty, Number(i.product.salePrice) || 0)),
+    0,
+  );
+
+  const grandTotal = (() => {
+    if (agreedPrice === null || agreedPrice === "") return subtotal;
+    const s = String(agreedPrice);
+    if (s.endsWith(".")) return subtotal;
+    const n = Number(s);
+    if (isNaN(n) || n < 0) return subtotal;
+    return parseFloat(n.toFixed(10));
+  })();
+
+  const totalItems = cart.reduce((sum, i) => safeAdd(sum, i.qty), 0);
+
+  const discountPercent =
+    originalSubtotal > 0
+      ? parseFloat(
+          (((originalSubtotal - grandTotal) / originalSubtotal) * 100).toFixed(
+            2,
+          ),
+        )
+      : 0;
 
   const createSaleMutation = useMutation({
     mutationFn: async (paymentData: PaymentData) => {
@@ -72,89 +158,101 @@ export function SalesPage() {
           customUnitPrice: Number(item.unitPrice),
           discountAmount: 0,
         })),
-        notes: '',
+        notes: "",
       });
 
-      const payments: any[] = [];
-      if (paymentData.cashAmount > 0) payments.push({ method: 'CASH', amount: paymentData.cashAmount });
-      if (paymentData.cardAmount > 0) payments.push({ method: 'CARD', amount: paymentData.cardAmount });
-      if (paymentData.debtAmount > 0) payments.push({ method: 'DEBT', amount: paymentData.debtAmount });
+      const payments: { method: "CASH" | "CARD" | "DEBT"; amount: number }[] =
+        [];
+      if (paymentData.cashAmount > 0)
+        payments.push({ method: "CASH", amount: paymentData.cashAmount });
+      if (paymentData.cardAmount > 0)
+        payments.push({ method: "CARD", amount: paymentData.cardAmount });
+      if (paymentData.debtAmount > 0)
+        payments.push({ method: "DEBT", amount: paymentData.debtAmount });
+
+      const agreedTotalValue =
+        Math.abs(grandTotal - subtotal) > 0.001 ? grandTotal : undefined;
 
       return salesApi.complete(draftSale.id, {
         payments,
         customerId: paymentData.customerId || undefined,
         customerName: paymentData.customerName || undefined,
         customerPhone: paymentData.customerPhone || undefined,
-        agreedTotal: grandTotal !== subtotal ? grandTotal : undefined,
+        agreedTotal: agreedTotalValue,
       });
     },
     onSuccess: async (sale) => {
-      toast.success('Savdo yakunlandi');
-      const blob = await salesApi.downloadReceipt(sale.id);
-      const url = window.URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
-      setReceiptUrl(url);
-      setCompletedSale(sale);
+      toast.success("Savdo yakunlandi");
+      try {
+        const blob = await salesApi.downloadReceipt(sale.id);
+        const url = window.URL.createObjectURL(
+          new Blob([blob], { type: "application/pdf" }),
+        );
+        setReceiptUrl(url);
+        setCompletedSale(sale);
+      } catch {
+        toast.error("Chekni yuklashda xatolik");
+      }
       setCart([]);
+      setAgreedPrice(null);
       setIsPaymentModalOpen(false);
       setIsCartOpen(false);
     },
+    onError: () => {
+      toast.error("Savdoni yakunlashda xatolik yuz berdi");
+    },
   });
 
-  // ── Yangi mahsulot TEPAGA qo'shiladi ──
   const addToCart = (product: Product) => {
     setCart((prev) => {
-      const existing = prev.find(i => i.product.id === product.id);
+      const existing = prev.find((i) => i.product.id === product.id);
       if (existing) {
-        return prev.map(i =>
-          i.product.id === product.id ? { ...i, qty: i.qty + 1 } : i
+        return prev.map((i) =>
+          i.product.id === product.id
+            ? { ...i, qty: parseFloat((i.qty + 1).toFixed(10)) }
+            : i,
         );
       }
-      // Yangi mahsulot ro'yxat boshiga (tepaga)
-      return [{ product, qty: 1, unitPrice: Number(product.salePrice) || 0 }, ...prev];
+      return [
+        { product, qty: 1, unitPrice: Number(product.salePrice) || 0 },
+        ...prev,
+      ];
     });
     setAgreedPrice(null);
   };
 
   const updateQty = (productId: string, qty: number) => {
+    const safeQty = Math.max(0.001, isNaN(qty) ? 0.001 : qty);
     setCart((prev) =>
-      prev.map(i => i.product.id === productId ? { ...i, qty: Math.max(0.001, qty) } : i)
+      prev.map((i) =>
+        i.product.id === productId ? { ...i, qty: safeQty } : i,
+      ),
     );
     setAgreedPrice(null);
   };
 
   const updatePrice = (productId: string, price: number) => {
+    const safePrice = Math.max(0, isNaN(price) ? 0 : price);
     setCart((prev) =>
-      prev.map(i => i.product.id === productId ? { ...i, unitPrice: Math.max(0, price) } : i)
+      prev.map((i) =>
+        i.product.id === productId ? { ...i, unitPrice: safePrice } : i,
+      ),
     );
     setAgreedPrice(null);
   };
 
   const removeFromCart = (productId: string) => {
-    setCart((prev) => prev.filter(i => i.product.id !== productId));
+    setCart((prev) => prev.filter((i) => i.product.id !== productId));
     setAgreedPrice(null);
   };
-
-  const subtotal = parseFloat(cart.reduce((sum, i) => sum + i.qty * i.unitPrice, 0).toFixed(10));
-  const originalSubtotal = parseFloat(
-    cart.reduce((sum, i) => sum + i.qty * Number(i.product.salePrice), 0).toFixed(10)
-  );
-
-  const grandTotal = agreedPrice !== null && agreedPrice !== '' && !String(agreedPrice).endsWith('.')
-    ? parseFloat(Number(agreedPrice).toFixed(10))
-    : subtotal;
-
-  const totalItems = cart.reduce((sum, i) => sum + i.qty, 0);
-
-  const discountPercent = originalSubtotal > 0
-    ? parseFloat((((originalSubtotal - grandTotal) / originalSubtotal) * 100).toFixed(2))
-    : 0;
 
   const filteredProducts = sortProducts(
     (products || []).filter((p: Product) => {
       const matchesSearch = p.name.toLowerCase().includes(search.toLowerCase());
-      const matchesCategory = !selectedCategoryId || p.categoryId === selectedCategoryId;
+      const matchesCategory =
+        !selectedCategoryId || p.categoryId === selectedCategoryId;
       return matchesSearch && matchesCategory;
-    })
+    }),
   );
 
   if (productsLoading || categoriesLoading) {
@@ -168,7 +266,6 @@ export function SalesPage() {
   return (
     <>
       <div className="flex flex-col lg:flex-row gap-4 h-[100dvh] pb-20 lg:pb-0">
-
         {/* ── LEFT: Mahsulotlar ── */}
         <div className="flex-1 flex flex-col min-h-0">
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-3 mb-3 sticky top-0 z-10">
@@ -185,8 +282,8 @@ export function SalesPage() {
                 onClick={() => setSelectedCategoryId(null)}
                 className={`px-3 py-1 rounded-full text-xs font-semibold transition-all whitespace-nowrap ${
                   !selectedCategoryId
-                    ? 'bg-indigo-600 text-white shadow-sm'
-                    : 'bg-gray-100 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600'
+                    ? "bg-indigo-600 text-white shadow-sm"
+                    : "bg-gray-100 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600"
                 }`}
               >
                 Barchasi
@@ -197,8 +294,8 @@ export function SalesPage() {
                   onClick={() => setSelectedCategoryId(cat.id)}
                   className={`px-3 py-1 rounded-full text-xs font-semibold transition-all whitespace-nowrap ${
                     selectedCategoryId === cat.id
-                      ? 'bg-indigo-600 text-white shadow-sm'
-                      : 'bg-gray-100 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600'
+                      ? "bg-indigo-600 text-white shadow-sm"
+                      : "bg-gray-100 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600"
                   }`}
                 >
                   {cat.name}
@@ -216,8 +313,8 @@ export function SalesPage() {
             ) : (
               filteredProducts.map((product: Product) => {
                 const stock = parseFloat(String(product.stockQuantity || 0));
-                const inCart = cart.find(i => i.product.id === product.id);
-                const isOut = stock === 0;
+                const inCart = cart.find((i) => i.product.id === product.id);
+                const isOut = stock <= 0;
                 const isLow = stock > 0 && stock <= 5;
 
                 return (
@@ -226,15 +323,19 @@ export function SalesPage() {
                     onClick={() => !isOut && addToCart(product)}
                     className={`flex items-center gap-3 bg-white rounded-xl border px-3 py-2.5 transition-all ${
                       isOut
-                        ? 'opacity-50 cursor-not-allowed border-gray-100'
+                        ? "opacity-50 cursor-not-allowed border-gray-100"
                         : inCart
-                        ? 'border-indigo-400 shadow-sm cursor-pointer bg-indigo-50/30'
-                        : 'border-gray-100 hover:border-indigo-300 hover:shadow-sm cursor-pointer'
+                          ? "border-indigo-400 shadow-sm cursor-pointer bg-indigo-50/30"
+                          : "border-gray-100 hover:border-indigo-300 hover:shadow-sm cursor-pointer"
                     }`}
                   >
                     <div className="w-12 h-12 rounded-lg bg-gray-100 flex-shrink-0 overflow-hidden border border-gray-200">
                       {product.imageUrl ? (
-                        <img src={product.imageUrl} alt={product.name} className="w-full h-full object-cover" />
+                        <img
+                          src={product.imageUrl}
+                          alt={product.name}
+                          className="w-full h-full object-cover"
+                        />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center">
                           <Package size={18} className="text-gray-300" />
@@ -243,17 +344,33 @@ export function SalesPage() {
                     </div>
 
                     <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-gray-900 text-sm leading-tight line-clamp-2">{product.name}</p>
-                      <p className={`text-xs mt-0.5 font-medium flex items-center gap-1 ${
-                        isOut ? 'text-red-500' : isLow ? 'text-orange-500' : 'text-gray-400'
-                      }`}>
-                        {(isOut || isLow) && <AlertTriangle size={11} className="flex-shrink-0" />}
-                        {isOut ? 'Tugagan' : isLow ? `${fmtQty(stock)} ta qoldi` : `${fmtQty(stock)} ta`}
+                      <p className="font-semibold text-gray-900 text-sm leading-tight line-clamp-2">
+                        {product.name}
+                      </p>
+                      <p
+                        className={`text-xs mt-0.5 font-medium flex items-center gap-1 ${
+                          isOut
+                            ? "text-red-500"
+                            : isLow
+                              ? "text-orange-500"
+                              : "text-gray-400"
+                        }`}
+                      >
+                        {(isOut || isLow) && (
+                          <AlertTriangle size={11} className="flex-shrink-0" />
+                        )}
+                        {isOut
+                          ? "Tugagan"
+                          : isLow
+                            ? `${fmtQty(stock)} ta qoldi`
+                            : `${fmtQty(stock)} ta`}
                       </p>
                     </div>
 
                     <div className="text-right flex-shrink-0">
-                      <p className="font-bold text-indigo-600 text-sm">{fmt(product.salePrice)}</p>
+                      <p className="font-bold text-indigo-600 text-sm">
+                        {fmt(product.salePrice)}
+                      </p>
                       {inCart && (
                         <span className="inline-block mt-0.5 bg-indigo-600 text-white text-xs px-1.5 py-0.5 rounded-full font-bold">
                           {fmtQty(inCart.qty)} ta
@@ -272,7 +389,8 @@ export function SalesPage() {
           <Card className="flex flex-col h-full border-indigo-100 shadow-lg">
             <div className="p-4 border-b border-gray-100 flex items-center justify-between">
               <h2 className="font-bold text-base flex items-center gap-2 text-gray-800">
-                <ShoppingCart size={18} className="text-indigo-600" /> Joriy savdo
+                <ShoppingCart size={18} className="text-indigo-600" /> Joriy
+                savdo
               </h2>
               <span className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full text-xs font-bold">
                 {fmtQty(totalItems)} ta
@@ -324,12 +442,16 @@ export function SalesPage() {
               >
                 <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
                   <h2 className="font-bold text-base flex items-center gap-2">
-                    <ShoppingCart size={18} className="text-indigo-600" /> Joriy savdo
+                    <ShoppingCart size={18} className="text-indigo-600" /> Joriy
+                    savdo
                     <span className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full text-xs font-bold">
                       {fmtQty(totalItems)} ta
                     </span>
                   </h2>
-                  <button onClick={() => setIsCartOpen(false)} className="p-1 rounded-lg hover:bg-gray-100">
+                  <button
+                    onClick={() => setIsCartOpen(false)}
+                    className="p-1 rounded-lg hover:bg-gray-100"
+                  >
                     <ChevronUp size={20} className="text-gray-500" />
                   </button>
                 </div>
@@ -355,7 +477,10 @@ export function SalesPage() {
                   subtotal={subtotal}
                   originalSubtotal={originalSubtotal}
                   cart={cart}
-                  onPay={() => { setIsCartOpen(false); setIsPaymentModalOpen(true); }}
+                  onPay={() => {
+                    setIsCartOpen(false);
+                    setIsPaymentModalOpen(true);
+                  }}
                   agreedPrice={agreedPrice}
                   onAgreedPriceChange={setAgreedPrice}
                   discountPercent={discountPercent}
@@ -390,37 +515,48 @@ export function SalesPage() {
         isSubmitting={createSaleMutation.isPending}
       />
 
-      {receiptUrl && (
+      {receiptUrl && completedSale && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
           <div
             className="bg-white w-full max-w-md rounded-2xl shadow-2xl flex flex-col overflow-hidden"
-            style={{ maxHeight: '90vh' }}
+            style={{ maxHeight: "90vh" }}
           >
             <div className="p-4 border-b flex justify-between items-center">
               <h3 className="font-bold text-gray-900">Chek</h3>
               <button
-                onClick={() => setReceiptUrl(null)}
+                onClick={closeReceipt}
                 className="p-1.5 hover:bg-gray-100 rounded-lg"
               >
                 <X size={18} className="text-gray-500" />
               </button>
             </div>
-            <div className="flex-1 overflow-hidden" style={{ minHeight: '400px' }}>
-              <iframe src={receiptUrl} className="w-full h-full" style={{ minHeight: '400px' }} />
+            <div
+              className="flex-1 overflow-hidden"
+              style={{ minHeight: "400px" }}
+            >
+              <iframe
+                src={receiptUrl}
+                className="w-full h-full"
+                style={{ minHeight: "400px" }}
+                title="receipt"
+              />
             </div>
             <div className="p-3 border-t flex gap-2">
               <button
                 onClick={() => {
-                  const iframe = document.querySelector('iframe') as HTMLIFrameElement;
+                  const iframe = document.querySelector(
+                    "iframe",
+                  ) as HTMLIFrameElement;
                   iframe?.contentWindow?.print();
                 }}
                 className="flex-1 bg-indigo-600 text-white py-2.5 rounded-xl font-semibold text-sm"
               >
                 Print
               </button>
+
               <a
                 href={receiptUrl}
-                download={`receipt-${completedSale?.saleNumber}.pdf`}
+                download={`receipt-${completedSale.saleNumber}.pdf`}
                 className="flex-1 bg-gray-100 text-gray-700 text-center py-2.5 rounded-xl font-semibold text-sm"
               >
                 PDF yuklash
@@ -434,7 +570,12 @@ export function SalesPage() {
 }
 
 // ── CartItemRow ──────────────────────────────────────────────
-function CartItemRow({ item, onUpdateQty, onUpdatePrice, onRemove }: {
+function CartItemRow({
+  item,
+  onUpdateQty,
+  onUpdatePrice,
+  onRemove,
+}: {
   item: CartItem;
   onUpdateQty: (id: string, qty: number) => void;
   onUpdatePrice: (id: string, price: number) => void;
@@ -443,18 +584,32 @@ function CartItemRow({ item, onUpdateQty, onUpdatePrice, onRemove }: {
   const [qtyInput, setQtyInput] = useState(String(item.qty));
   const [priceInput, setPriceInput] = useState(String(item.unitPrice));
 
-  const originalPrice = Number(item.product.salePrice);
+  // Sync local input display when parent cart item changes (e.g. re-added from product list)
+  useEffect(() => {
+    setQtyInput(String(item.qty));
+  }, [item.qty]);
+
+  useEffect(() => {
+    setPriceInput(String(item.unitPrice));
+  }, [item.unitPrice]);
+
+  const originalPrice = Number(item.product.salePrice) || 0;
   const currentPrice = Number(item.unitPrice);
-  const itemDiscountPercent = originalPrice > 0 && currentPrice < originalPrice
-    ? parseFloat(((1 - currentPrice / originalPrice) * 100).toFixed(1))
-    : 0;
+  const itemDiscountPercent =
+    originalPrice > 0 && currentPrice < originalPrice
+      ? parseFloat(((1 - currentPrice / originalPrice) * 100).toFixed(1))
+      : 0;
 
   return (
     <div className="bg-gray-50 rounded-xl border border-gray-100 p-2.5 space-y-2">
       <div className="flex items-center gap-2">
         <div className="w-10 h-10 rounded-lg bg-gray-200 flex-shrink-0 overflow-hidden">
           {item.product.imageUrl ? (
-            <img src={item.product.imageUrl} alt={item.product.name} className="w-full h-full object-cover" />
+            <img
+              src={item.product.imageUrl}
+              alt={item.product.name}
+              className="w-full h-full object-cover"
+            />
           ) : (
             <div className="w-full h-full flex items-center justify-center">
               <Package size={16} className="text-gray-400" />
@@ -462,9 +617,13 @@ function CartItemRow({ item, onUpdateQty, onUpdatePrice, onRemove }: {
           )}
         </div>
         <div className="flex-1 min-w-0">
-          <p className="font-semibold text-gray-900 text-xs leading-tight line-clamp-2">{item.product.name}</p>
+          <p className="font-semibold text-gray-900 text-xs leading-tight line-clamp-2">
+            {item.product.name}
+          </p>
           <div className="flex items-center gap-1.5 mt-0.5">
-            <p className="text-xs text-gray-400">Asl narx: {fmt(originalPrice)}</p>
+            <p className="text-xs text-gray-400">
+              Asl narx: {fmt(originalPrice)}
+            </p>
             {itemDiscountPercent > 0 && (
               <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full font-bold">
                 -{itemDiscountPercent}%
@@ -496,8 +655,12 @@ function CartItemRow({ item, onUpdateQty, onUpdatePrice, onRemove }: {
             }}
             onBlur={() => {
               const val = parseFloat(qtyInput);
-              if (isNaN(val) || val <= 0) { setQtyInput('1'); onUpdateQty(item.product.id, 1); }
-              else setQtyInput(String(val));
+              if (isNaN(val) || val <= 0) {
+                setQtyInput("1");
+                onUpdateQty(item.product.id, 1);
+              } else {
+                setQtyInput(String(val));
+              }
             }}
             className="w-16 px-2 py-1 text-xs border border-gray-200 rounded-lg focus:outline-none focus:border-indigo-400 text-center bg-white font-bold"
             min={0.001}
@@ -510,7 +673,9 @@ function CartItemRow({ item, onUpdateQty, onUpdatePrice, onRemove }: {
         <div className="flex items-center gap-1">
           <span className="text-xs text-gray-400">Narx:</span>
           <div className="relative">
-            <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-xs text-orange-400 font-bold pointer-events-none">$</span>
+            <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-xs text-orange-400 font-bold pointer-events-none">
+              $
+            </span>
             <input
               type="number"
               step="any"
@@ -519,7 +684,8 @@ function CartItemRow({ item, onUpdateQty, onUpdatePrice, onRemove }: {
                 const raw = e.target.value;
                 setPriceInput(raw);
                 const val = parseFloat(raw);
-                if (!isNaN(val) && val >= 0) onUpdatePrice(item.product.id, val);
+                if (!isNaN(val) && val >= 0)
+                  onUpdatePrice(item.product.id, val);
               }}
               onBlur={() => {
                 const val = parseFloat(priceInput);
@@ -532,8 +698,8 @@ function CartItemRow({ item, onUpdateQty, onUpdatePrice, onRemove }: {
               }}
               className={`w-20 pl-5 pr-1 py-1 text-xs border rounded-lg focus:outline-none text-center font-bold transition-colors ${
                 itemDiscountPercent > 0
-                  ? 'border-orange-300 bg-orange-50 text-orange-700 focus:border-orange-500'
-                  : 'border-gray-200 bg-white text-gray-700 focus:border-indigo-400'
+                  ? "border-orange-300 bg-orange-50 text-orange-700 focus:border-orange-500"
+                  : "border-gray-200 bg-white text-gray-700 focus:border-indigo-400"
               }`}
               min={0}
             />
@@ -549,7 +715,14 @@ function CartItemRow({ item, onUpdateQty, onUpdatePrice, onRemove }: {
 }
 
 // ── CartFooter ──────────────────────────────────────────────
-function CartFooter({ subtotal, originalSubtotal, cart, onPay, agreedPrice, onAgreedPriceChange, discountPercent }: {
+function CartFooter({
+  subtotal,
+  originalSubtotal,
+  cart,
+  onPay,
+  agreedPrice,
+  onAgreedPriceChange,
+}: {
   subtotal: number;
   originalSubtotal: number;
   cart: CartItem[];
@@ -558,11 +731,23 @@ function CartFooter({ subtotal, originalSubtotal, cart, onPay, agreedPrice, onAg
   onAgreedPriceChange: (val: number | string | null) => void;
   discountPercent: number;
 }) {
-  const displayTotal = agreedPrice !== null && agreedPrice !== '' ? Number(agreedPrice) : subtotal;
+  const displayTotal = (() => {
+    if (agreedPrice === null || agreedPrice === "") return subtotal;
+    const s = String(agreedPrice);
+    if (s.endsWith(".")) return subtotal;
+    const n = Number(s);
+    if (isNaN(n) || n < 0) return subtotal;
+    return n;
+  })();
 
-  const agreedDiscountPercent = originalSubtotal > 0 && displayTotal < originalSubtotal
-    ? parseFloat(((1 - displayTotal / originalSubtotal) * 100).toFixed(2))
-    : 0;
+  const agreedDiscountPercent =
+    originalSubtotal > 0 && displayTotal < originalSubtotal
+      ? parseFloat(((1 - displayTotal / originalSubtotal) * 100).toFixed(2))
+      : 0;
+
+  // Use a key that forces input remount when subtotal changes while agreedPrice is null
+  // This prevents stale displayed value when cart items change
+  const inputKey = agreedPrice === null ? `sub-${subtotal}` : "agreed";
 
   return (
     <div className="p-3 border-t border-gray-100 bg-white space-y-2">
@@ -576,7 +761,10 @@ function CartFooter({ subtotal, originalSubtotal, cart, onPay, agreedPrice, onAg
       {subtotal < originalSubtotal && (
         <div className="flex justify-between text-xs text-green-600">
           <span>Narx chegirmasi</span>
-          <span>-{fmt(originalSubtotal - subtotal)} ({parseFloat(((1 - subtotal / originalSubtotal) * 100).toFixed(2))}%)</span>
+          <span>
+            -{fmt(originalSubtotal - subtotal)} (
+            {parseFloat(((1 - subtotal / originalSubtotal) * 100).toFixed(2))}%)
+          </span>
         </div>
       )}
 
@@ -586,24 +774,37 @@ function CartFooter({ subtotal, originalSubtotal, cart, onPay, agreedPrice, onAg
       </div>
 
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs text-gray-500 whitespace-nowrap">Kelishilgan narx</span>
+        <span className="text-xs text-gray-500 whitespace-nowrap">
+          Kelishilgan narx
+        </span>
         <div className="relative">
-          <span className="absolute left-2 top-1/2 -translate-y-1/2 text-indigo-400 text-xs font-bold pointer-events-none">$</span>
+          <span className="absolute left-2 top-1/2 -translate-y-1/2 text-indigo-400 text-xs font-bold pointer-events-none">
+            $
+          </span>
           <input
+            key={inputKey}
             type="text"
             inputMode="decimal"
-            value={agreedPrice !== null ? String(agreedPrice) : String(subtotal)}
+            defaultValue={
+              agreedPrice !== null ? String(agreedPrice) : String(subtotal)
+            }
             onChange={(e) => {
               const raw = e.target.value;
               if (!/^[\d.]*$/.test(raw)) return;
               if ((raw.match(/\./g) || []).length > 1) return;
-              if (raw === '' || raw.endsWith('.')) {
-                onAgreedPriceChange(raw === '' ? null : raw as any);
+              if (raw === "") {
+                onAgreedPriceChange(null);
+                return;
+              }
+              if (raw.endsWith(".")) {
+                onAgreedPriceChange(raw);
                 return;
               }
               const val = Number(raw);
-              if (val < 0) return;
-              onAgreedPriceChange(val === subtotal ? null : val);
+              if (isNaN(val) || val < 0) return;
+              onAgreedPriceChange(
+                Math.abs(val - subtotal) < 0.0001 ? null : val,
+              );
             }}
             className="w-28 pl-6 pr-2 py-1 text-xs border border-indigo-200 rounded-lg focus:outline-none focus:border-indigo-500 text-right bg-indigo-50 font-semibold text-indigo-700"
           />
@@ -613,7 +814,9 @@ function CartFooter({ subtotal, originalSubtotal, cart, onPay, agreedPrice, onAg
       {agreedDiscountPercent > 0 && (
         <div className="flex justify-between text-xs text-orange-600 bg-orange-50 rounded-lg px-2 py-1">
           <span>Kelishilgan chegirma</span>
-          <span className="font-bold">-{agreedDiscountPercent}% ({fmt(originalSubtotal - displayTotal)})</span>
+          <span className="font-bold">
+            -{agreedDiscountPercent}% ({fmt(originalSubtotal - displayTotal)})
+          </span>
         </div>
       )}
 
@@ -629,7 +832,12 @@ function CartFooter({ subtotal, originalSubtotal, cart, onPay, agreedPrice, onAg
         </div>
       </div>
 
-      <Button size="lg" className="w-full text-sm font-bold" onClick={onPay} disabled={cart.length === 0}>
+      <Button
+        size="lg"
+        className="w-full text-sm font-bold"
+        onClick={onPay}
+        disabled={cart.length === 0}
+      >
         To'lov qilish
       </Button>
     </div>

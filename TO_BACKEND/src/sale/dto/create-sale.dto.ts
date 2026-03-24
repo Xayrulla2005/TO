@@ -1,11 +1,22 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
-  IsString, IsNotEmpty, IsNumber, Min, IsArray,
-  ValidateNested, IsOptional, IsEnum, ArrayNotEmpty, IsUUID,
+  IsString,
+  IsNotEmpty,
+  IsNumber,
+  Min,
+  IsArray,
+  ValidateNested,
+  IsOptional,
+  IsEnum,
+  ArrayNotEmpty,
+  IsUUID,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PaymentMethod } from '../../payments/entities/payment.entity';
 
+// ───────────────────────────────────────────────────────────
+// SALE ITEM INPUT
+// ───────────────────────────────────────────────────────────
 export class SaleItemInputDto {
   @ApiProperty()
   @IsUUID()
@@ -33,8 +44,11 @@ export class SaleItemInputDto {
   discountAmount?: number;
 }
 
+// ───────────────────────────────────────────────────────────
+// CREATE SALE
+// ───────────────────────────────────────────────────────────
 export class CreateSaleDto {
-  @ApiProperty()
+  @ApiProperty({ type: [SaleItemInputDto] })
   @IsArray()
   @ArrayNotEmpty()
   @ValidateNested({ each: true })
@@ -47,6 +61,9 @@ export class CreateSaleDto {
   notes?: string;
 }
 
+// ───────────────────────────────────────────────────────────
+// PAYMENT INPUT
+// ───────────────────────────────────────────────────────────
 export class PaymentInputDto {
   @ApiProperty({ enum: PaymentMethod })
   @IsEnum(PaymentMethod)
@@ -64,6 +81,9 @@ export class PaymentInputDto {
   notes?: string;
 }
 
+// ───────────────────────────────────────────────────────────
+// COMPLETE SALE (ENG MUHIM)
+// ───────────────────────────────────────────────────────────
 export class CompleteSaleDto {
   @ApiProperty({ type: [PaymentInputDto] })
   @IsArray()
@@ -72,13 +92,13 @@ export class CompleteSaleDto {
   @Type(() => PaymentInputDto)
   payments!: PaymentInputDto[];
 
-  // ── Mavjud mijoz ID si ─────────────────────────────────
+  // ── Existing customer ───────────────────────────────
   @ApiPropertyOptional({ description: 'Existing customer UUID' })
   @IsOptional()
   @IsUUID()
   customerId?: string;
 
-  // ── Yangi mijoz yoki qarz uchun ────────────────────────
+  // ── New customer ───────────────────────────────────
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
@@ -89,7 +109,7 @@ export class CompleteSaleDto {
   @IsString()
   customerPhone?: string;
 
-  // ── Qarz uchun (eski fieldlar - backward compat) ───────
+  // ── Debt (backward compatibility) ──────────────────
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
@@ -109,15 +129,21 @@ export class CompleteSaleDto {
   @IsOptional()
   @IsString()
   debtNotes?: string;
-}
 
-export class CancelSaleDto {
-  @ApiPropertyOptional()
+  // ── AGREED TOTAL (CRITICAL FIX) ────────────────────
+  @ApiPropertyOptional({
+    description: 'Manual override of total price (agreed price)',
+    example: 120.5,
+  })
   @IsOptional()
-  @IsString()
-  reason?: string;
+  @IsNumber()
+  @Type(() => Number)
+  agreedTotal?: number;
 }
 
+// ───────────────────────────────────────────────────────────
+// UPDATE SALE ITEM
+// ───────────────────────────────────────────────────────────
 export class UpdateSaleItemDto {
   @ApiProperty()
   @IsUUID()
@@ -139,8 +165,11 @@ export class UpdateSaleItemDto {
   discountAmount?: number;
 }
 
+// ───────────────────────────────────────────────────────────
+// UPDATE SALE
+// ───────────────────────────────────────────────────────────
 export class UpdateSaleDto {
-  @ApiProperty()
+  @ApiProperty({ type: [UpdateSaleItemDto] })
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => UpdateSaleItemDto)
@@ -150,4 +179,14 @@ export class UpdateSaleDto {
   @IsOptional()
   @IsString()
   notes?: string;
+}
+
+// ───────────────────────────────────────────────────────────
+// CANCEL SALE
+// ───────────────────────────────────────────────────────────
+export class CancelSaleDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  reason?: string;
 }

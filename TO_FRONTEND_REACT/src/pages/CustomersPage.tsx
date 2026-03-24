@@ -1,4 +1,4 @@
-// src/pages/CustomersPage.tsx — PRODUCTION COMPLETE v5
+// src/pages/CustomersPage.tsx — PRODUCTION COMPLETE v6
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -28,7 +28,7 @@ import {
 const fmt = (v: number | string | null | undefined) => `$${formatCurrency(v)}`;
 
 // ─────────────────────────────────────────────────────────────
-// Types (local only — DebtPayment imported from customers.api)
+// Types
 // ─────────────────────────────────────────────────────────────
 interface DebtWithPayments {
   id: string;
@@ -45,84 +45,111 @@ interface DebtWithPayments {
 }
 
 // ─────────────────────────────────────────────────────────────
-// PDF Utils
+// PdfActionButtons — strict separation of print / download / share
 // ─────────────────────────────────────────────────────────────
-function triggerDownload(url: string, filename: string) {
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-}
-
-function blobUrlToFile(blobUrl: string, filename: string): Promise<File> {
-  return fetch(blobUrl)
-    .then((r) => r.blob())
-    .then((blob) => new File([blob], filename, { type: "application/pdf" }));
-}
-
 function PdfActionButtons({
   pdfUrl,
   filename,
-  isPdfBlob = true,
 }: {
   pdfUrl: string | null;
   filename: string;
-  isPdfBlob?: boolean;
 }) {
   const [sharing, setSharing] = useState(false);
   const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
   if (!pdfUrl) return null;
 
+  // ── 1. PRINT ───────────────────────────────────────────────
   const handlePrint = () => {
     const win = window.open(pdfUrl, "_blank");
-    if (win) {
-      win.addEventListener("load", () => { win.focus(); win.print(); });
-    } else {
+    if (!win) {
       toast.error("Popup bloklangan — brauzer sozlamalarini tekshiring");
+      return;
+    }
+    win.addEventListener("load", () => {
+      win.focus();
+      win.print();
+    });
+  };
+
+  // ── 2. DOWNLOAD ────────────────────────────────────────────
+  // Always fetches a fresh Blob reference so the anchor's download
+  // attribute works reliably across all browsers. Never opens a tab,
+  // never calls print().
+  const handleDownload = async () => {
+    try {
+      const response = await fetch(pdfUrl);
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = filename;
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 150);
+    } catch {
+      toast.error("Yuklab olishda xatolik yuz berdi");
     }
   };
 
-  const handleDownload = () => {
-    if (isPdfBlob) {
-      triggerDownload(pdfUrl, filename);
-    } else {
-      const win = window.open(pdfUrl, "_blank");
-      if (win) {
-        win.addEventListener("load", () => { win.focus(); setTimeout(() => win.print(), 400); });
-      } else {
-        triggerDownload(pdfUrl, filename.replace(".pdf", ".html"));
-        toast.success("HTML fayl yuklandi — brauzerda ochib Ctrl+P → Save as PDF");
-      }
-    }
-  };
-
+  // ── 3. SHARE ───────────────────────────────────────────────
+  // Tries native file sharing → URL sharing → silent download.
+  // Never calls print().
   const handleShare = async () => {
     setSharing(true);
     try {
-      if (isPdfBlob) {
-        const canShareFile =
-          typeof navigator.share === "function" &&
-          typeof navigator.canShare === "function" &&
-          navigator.canShare({ files: [new File([], "t.pdf", { type: "application/pdf" })] });
-        if (canShareFile) {
-          const file = await blobUrlToFile(pdfUrl, filename);
-          await navigator.share({ title: filename.replace(".pdf", ""), files: [file] });
-        } else if (typeof navigator.share === "function") {
-          await navigator.share({ title: filename.replace(".pdf", ""), url: window.location.href });
-        } else {
-          triggerDownload(pdfUrl, filename);
-          toast.success("PDF yuklandi — Telegram/WhatsApp orqali yuboring");
-        }
-      } else {
-        triggerDownload(pdfUrl, filename.replace(".pdf", ".html"));
-        toast.success("Fayl yuklandi — uni Telegram/WhatsApp ga yuboring");
+      const response = await fetch(pdfUrl);
+      const blob = await response.blob();
+      const file = new File([blob], filename, { type: "application/pdf" });
+
+      const canShareFile =
+        typeof navigator.share === "function" &&
+        typeof navigator.canShare === "function" &&
+        navigator.canShare({ files: [file] });
+
+      if (canShareFile) {
+        await navigator.share({ title: filename.replace(".pdf", ""), files: [file] });
+        return;
       }
+
+      if (typeof navigator.share === "function") {
+        await navigator.share({ title: filename.replace(".pdf", ""), url: window.location.href });
+        return;
+      }
+
+      // Last resort: trigger download so user can forward manually
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = filename;
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 150);
+      toast.success("PDF yuklandi — Telegram/WhatsApp orqali yuboring");
     } catch (err: any) {
-      if (err?.name !== "AbortError") {
-        triggerDownload(pdfUrl, isPdfBlob ? filename : filename.replace(".pdf", ".html"));
+      if (err?.name === "AbortError") return;
+      // Any other failure → silent download fallback
+      try {
+        const r = await fetch(pdfUrl);
+        const b = await r.blob();
+        const bu = URL.createObjectURL(b);
+        const a = document.createElement("a");
+        a.href = bu;
+        a.download = filename;
+        a.style.display = "none";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(bu), 150);
         toast.success("Fayl yuklandi");
+      } catch {
+        toast.error("Ulashishda xatolik yuz berdi");
       }
     } finally {
       setSharing(false);
@@ -132,15 +159,27 @@ function PdfActionButtons({
   return (
     <div className="flex gap-2">
       {!isMobile && (
-        <button onClick={handlePrint} className="flex-1 flex items-center justify-center gap-1.5 bg-indigo-600 text-white py-2.5 rounded-xl font-semibold text-sm hover:bg-indigo-700 transition-colors">
+        <button
+          onClick={handlePrint}
+          className="flex-1 flex items-center justify-center gap-1.5 bg-indigo-600 text-white py-2.5 rounded-xl font-semibold text-sm hover:bg-indigo-700 transition-colors"
+        >
           <Printer size={15} /> Chop etish
         </button>
       )}
-      <button onClick={handleDownload} className="flex-1 flex items-center justify-center gap-1.5 bg-gray-100 text-gray-700 py-2.5 rounded-xl font-semibold text-sm hover:bg-gray-200 transition-colors">
+      <button
+        onClick={handleDownload}
+        className="flex-1 flex items-center justify-center gap-1.5 bg-gray-100 text-gray-700 py-2.5 rounded-xl font-semibold text-sm hover:bg-gray-200 transition-colors"
+      >
         <Download size={15} /> PDF yuklash
       </button>
-      <button onClick={handleShare} disabled={sharing} className="flex-1 flex items-center justify-center gap-1.5 bg-emerald-600 text-white py-2.5 rounded-xl font-semibold text-sm hover:bg-emerald-700 transition-colors disabled:opacity-60">
-        {sharing ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Share2 size={15} />}
+      <button
+        onClick={handleShare}
+        disabled={sharing}
+        className="flex-1 flex items-center justify-center gap-1.5 bg-emerald-600 text-white py-2.5 rounded-xl font-semibold text-sm hover:bg-emerald-700 transition-colors disabled:opacity-60"
+      >
+        {sharing
+          ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+          : <Share2 size={15} />}
         Ulashish
       </button>
     </div>
@@ -180,7 +219,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// OverdueDebtsBanner — 30 kundan oshgan qarzdorlar
+// OverdueDebtsBanner
 // ─────────────────────────────────────────────────────────────
 function OverdueDebtsBanner({ customers, onSelect }: { customers: any[]; onSelect: (c: any) => void }) {
   const [expanded, setExpanded] = useState(true);
@@ -276,7 +315,7 @@ function OverdueDebtsBanner({ customers, onSelect }: { customers: any[]; onSelec
 }
 
 // ─────────────────────────────────────────────────────────────
-// BulkPayDebtModal — Umumiy qarz to'lash (barcha qarzlar ketma-ket)
+// BulkPayDebtModal
 // ─────────────────────────────────────────────────────────────
 function BulkPayDebtModal({
   activeDebts,
@@ -303,11 +342,10 @@ function BulkPayDebtModal({
   const [totalPaidOut, setTotalPaidOut] = useState(0);
   const [lastDebtId, setLastDebtId] = useState<string | null>(null);
 
-  // Umumiy asl qarz (barcha qarzlar original amount yig'indisi)
-  const totalOriginalAmount = useMemo(
-    () => Math.round(activeDebts.reduce((s, { debt }) => s + Number(debt.originalAmount), 0) * 100) / 100,
-    [activeDebts],
-  );
+  // Cleanup blob URL on unmount
+  useEffect(() => {
+    return () => { if (receiptUrl) URL.revokeObjectURL(receiptUrl); };
+  }, [receiptUrl]);
 
   const handlePay = async () => {
     const amt = Number(amount);
@@ -352,12 +390,11 @@ function BulkPayDebtModal({
     setPaying(false);
     onAllPaid();
 
-    // Chekni yuklash — umumiy hisob bilan
     if (lastId) {
       setLoadingReceipt(true);
       try {
         const params = new URLSearchParams({
-          totalOriginal: String(totalRemaining),   // to'lovdan OLDINGI umumiy qoldiq
+          totalOriginal: String(totalRemaining),
           paidAmount: String(actualPaid),
           currentRemaining: String(newRemaining),
           paymentMethod: method,
@@ -410,7 +447,6 @@ function BulkPayDebtModal({
 
   return (
     <div className="space-y-4">
-      {/* Qarzlar ro'yxati — faqat ma'lumot, tugmasiz */}
       <div className="rounded-xl border border-gray-200 overflow-hidden">
         <div className="bg-gray-800 px-3 py-2.5 flex items-center justify-between">
           <p className="text-white font-bold text-xs">FAOL QARZLAR</p>
@@ -434,14 +470,12 @@ function BulkPayDebtModal({
             </div>
           );
         })}
-        {/* Jami qoldiq */}
         <div className="bg-gray-800 px-3 py-2.5 flex items-center justify-between">
           <p className="text-gray-300 text-xs font-semibold">{activeDebts.length} ta savdo · umumiy qoldiq</p>
           <p className="text-yellow-400 font-black text-base">{fmt(totalRemaining)}</p>
         </div>
       </div>
 
-      {/* To'lov summasi */}
       <div>
         <label className="text-xs font-semibold text-gray-600 mb-1.5 block">To'lov summasi</label>
         <div className="relative">
@@ -465,13 +499,10 @@ function BulkPayDebtModal({
           <p className="text-xs text-red-500 mt-1">Summa umumiy qarzdan oshib ketdi!</p>
         )}
         {Number(amount) < totalRemaining - 0.01 && Number(amount) > 0 && (
-          <p className="text-xs text-amber-600 mt-1">
-            Qisman to'lov — eng qadimiy qarzdan boshlab taqsimlanadi
-          </p>
+          <p className="text-xs text-amber-600 mt-1">Qisman to'lov — eng qadimiy qarzdan boshlab taqsimlanadi</p>
         )}
       </div>
 
-      {/* To'lov usuli */}
       <div>
         <label className="text-xs font-semibold text-gray-600 mb-1.5 block">To'lov usuli</label>
         <div className="flex gap-2">
@@ -487,11 +518,7 @@ function BulkPayDebtModal({
 
       <div className="flex gap-2 pt-1">
         <Button variant="outline" className="flex-1" onClick={onClose}>Bekor</Button>
-        <Button
-          className="flex-1"
-          isLoading={paying}
-          onClick={handlePay}
-        >
+        <Button className="flex-1" isLoading={paying} onClick={handlePay}>
           <DollarSign size={15} className="mr-1" />
           {fmt(Number(amount) || 0)} to'lash
         </Button>
@@ -504,9 +531,11 @@ function BulkPayDebtModal({
 // DebtListModal
 // ─────────────────────────────────────────────────────────────
 function DebtListModal({
-  customerId, customerName, customerPhone, onClose, onPayDebt,
+  customerId, customerName, customerPhone, onClose,
 }: {
-  customerId: string; customerName: string; customerPhone: string;
+  customerId: string;
+  customerName: string;
+  customerPhone: string;
   onClose: () => void;
   onPayDebt: (debtId: string, remaining: number, saleNumber?: string) => void;
 }) {
@@ -534,6 +563,11 @@ function DebtListModal({
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [pdfLoading, setPdfLoading] = useState(false);
   const tableRef = useRef<HTMLDivElement>(null);
+
+  // Cleanup generated PDF blob URL
+  useEffect(() => {
+    return () => { if (pdfUrl) URL.revokeObjectURL(pdfUrl); };
+  }, [pdfUrl]);
 
   const handleShowPdf = async () => {
     if (activeDebts.length === 0 || pdfUrl) return;
@@ -568,14 +602,19 @@ function DebtListModal({
         }
       }
       setPdfUrl(window.URL.createObjectURL(pdf.output("blob")));
-    } catch (e) {
+    } catch {
       toast.error("PDF yaratilmadi — npm install jspdf html2canvas");
     } finally {
       setPdfLoading(false);
     }
   };
 
-  if (isLoading) return <div className="flex items-center justify-center h-32"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-red-500" /></div>;
+  if (isLoading) return (
+    <div className="flex items-center justify-center h-32">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-red-500" />
+    </div>
+  );
+
   if (activeDebts.length === 0) return (
     <div className="text-center py-8 text-gray-400">
       <CheckCircle size={32} className="mx-auto mb-2 text-emerald-400 opacity-60" />
@@ -584,7 +623,6 @@ function DebtListModal({
     </div>
   );
 
-  // BulkPay modal ochiq bo'lsa
   if (showBulkPay) {
     return (
       <BulkPayDebtModal
@@ -657,7 +695,6 @@ function DebtListModal({
         </table>
       </div>
 
-      {/* ── Umumiy to'lash tugmasi ── */}
       <button
         onClick={() => setShowBulkPay(true)}
         className="w-full flex items-center justify-center gap-2 bg-emerald-600 text-white text-sm py-3.5 rounded-xl font-bold hover:bg-emerald-700 active:scale-95 transition-all shadow-sm"
@@ -667,10 +704,12 @@ function DebtListModal({
       </button>
 
       {pdfUrl ? (
-        <PdfActionButtons pdfUrl={pdfUrl} filename={`qarz-${customerName}.pdf`} isPdfBlob={false} />
+        <PdfActionButtons pdfUrl={pdfUrl} filename={`qarz-${customerName}.pdf`} />
       ) : (
         <button onClick={handleShowPdf} disabled={pdfLoading} className="w-full flex items-center justify-center gap-2 bg-indigo-600 text-white text-sm py-3 rounded-xl font-bold hover:bg-indigo-700 active:scale-95 transition-all disabled:opacity-60">
-          {pdfLoading ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> PDF yuklanmoqda...</> : <><FileText size={16} /> PDF ko'rish</>}
+          {pdfLoading
+            ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> PDF yuklanmoqda...</>
+            : <><FileText size={16} /> PDF ko'rish</>}
         </button>
       )}
     </div>
@@ -681,8 +720,11 @@ function DebtListModal({
 // PayDebtModal
 // ─────────────────────────────────────────────────────────────
 function PayDebtModal({ debtId, remaining, saleNumber, onClose, onSuccess }: {
-  debtId: string; remaining: number; saleNumber?: string;
-  onClose: () => void; onSuccess?: (paymentId: string, paidAmount: number) => void;
+  debtId: string;
+  remaining: number;
+  saleNumber?: string;
+  onClose: () => void;
+  onSuccess?: (paymentId: string, paidAmount: number) => void;
 }) {
   const qc = useQueryClient();
   const [amount, setAmount] = useState(String(remaining));
@@ -693,6 +735,10 @@ function PayDebtModal({ debtId, remaining, saleNumber, onClose, onSuccess }: {
   const [loadingReceipt, setLoadingReceipt] = useState(false);
   const [paidAmount, setPaidAmount] = useState(0);
   const [newRemaining, setNewRemaining] = useState<number | null>(null);
+
+  useEffect(() => {
+    return () => { if (receiptUrl) URL.revokeObjectURL(receiptUrl); };
+  }, [receiptUrl]);
 
   const downloadReceipt = async (id: string, pId?: string) => {
     setLoadingReceipt(true);
@@ -776,7 +822,8 @@ function PayDebtModal({ debtId, remaining, saleNumber, onClose, onSuccess }: {
       <div>
         <label className="text-xs font-semibold text-gray-600 mb-1.5 block">To'lov summasi</label>
         <div className="relative">
-          <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} max={remaining} min={0.01} step="0.01" className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-indigo-400 font-semibold text-lg pr-16" />
+          <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} max={remaining} min={0.01} step="0.01"
+            className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-indigo-400 font-semibold text-lg pr-16" />
           <button onClick={() => setAmount(String(remaining))} className="absolute right-2 top-1/2 -translate-y-1/2 text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded-lg font-semibold hover:bg-indigo-200 transition-colors">Hammasi</button>
         </div>
         {Number(amount) > remaining && <p className="text-xs text-red-500 mt-1">Summa qarzdan oshib ketdi!</p>}
@@ -809,7 +856,10 @@ function PayDebtModal({ debtId, remaining, saleNumber, onClose, onSuccess }: {
 // DebtPaymentsHistoryModal
 // ─────────────────────────────────────────────────────────────
 function DebtPaymentsHistoryModal({ debtId, originalAmount, onClose, onPayDebt }: {
-  debtId: string; originalAmount: number; onClose: () => void; onPayDebt: () => void;
+  debtId: string;
+  originalAmount: number;
+  onClose: () => void;
+  onPayDebt: () => void;
 }) {
   const { data: debt, isLoading } = useQuery<DebtWithPayments>({
     queryKey: ["debt-detail", debtId],
@@ -818,7 +868,14 @@ function DebtPaymentsHistoryModal({ debtId, originalAmount, onClose, onPayDebt }
   const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
   const [loadingReceiptId, setLoadingReceiptId] = useState<string | null>(null);
 
+  useEffect(() => {
+    return () => { if (receiptUrl) URL.revokeObjectURL(receiptUrl); };
+  }, [receiptUrl]);
+
   const handleViewReceipt = async (paymentId: string) => {
+    // Revoke previous receipt URL before loading a new one
+    if (receiptUrl) URL.revokeObjectURL(receiptUrl);
+    setReceiptUrl(null);
     setLoadingReceiptId(paymentId);
     try {
       const res = await api.get(`/debts/${debtId}/receipt?paymentId=${paymentId}`, { responseType: "blob" });
@@ -869,8 +926,14 @@ function DebtPaymentsHistoryModal({ debtId, originalAmount, onClose, onPayDebt }
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-gray-400">→ <span className="font-semibold text-red-600">{fmt(p.remainingAfter)}</span></span>
-                    <button onClick={() => handleViewReceipt(p.id)} disabled={loadingReceiptId === p.id} className="text-xs text-indigo-600 font-semibold p-1.5 rounded-lg hover:bg-indigo-50 transition-colors disabled:opacity-60 flex items-center gap-1">
-                      {loadingReceiptId === p.id ? <div className="w-3 h-3 border border-indigo-600 border-t-transparent rounded-full animate-spin" /> : <FileText size={13} />}
+                    <button
+                      onClick={() => handleViewReceipt(p.id)}
+                      disabled={loadingReceiptId === p.id}
+                      className="text-xs text-indigo-600 font-semibold p-1.5 rounded-lg hover:bg-indigo-50 transition-colors disabled:opacity-60 flex items-center gap-1"
+                    >
+                      {loadingReceiptId === p.id
+                        ? <div className="w-3 h-3 border border-indigo-600 border-t-transparent rounded-full animate-spin" />
+                        : <FileText size={13} />}
                     </button>
                   </div>
                 </div>
@@ -892,7 +955,12 @@ function DebtPaymentsHistoryModal({ debtId, originalAmount, onClose, onPayDebt }
             <iframe src={receiptUrl} className="w-full h-full" title="To'lov cheki" />
           </div>
           <div className="mt-2"><PdfActionButtons pdfUrl={receiptUrl} filename={`qarz-chek-${debtId.slice(0, 8)}.pdf`} /></div>
-          <button onClick={() => setReceiptUrl(null)} className="w-full mt-2 py-2 text-xs text-gray-500 hover:text-gray-700 transition-colors">Chekni yopish</button>
+          <button
+            onClick={() => { URL.revokeObjectURL(receiptUrl); setReceiptUrl(null); }}
+            className="w-full mt-2 py-2 text-xs text-gray-500 hover:text-gray-700 transition-colors"
+          >
+            Chekni yopish
+          </button>
         </div>
       )}
 
@@ -910,14 +978,22 @@ function DebtPaymentsHistoryModal({ debtId, originalAmount, onClose, onPayDebt }
 // ─────────────────────────────────────────────────────────────
 function ReturnModal({ sale, onClose }: { sale: Sale; onClose: () => void }) {
   const qc = useQueryClient();
-  const [quantities, setQuantities] = useState<Record<string, string>>(Object.fromEntries(sale.items.map((i) => [i.id, "0"])));
+  const [quantities, setQuantities] = useState<Record<string, string>>(
+    Object.fromEntries(sale.items.map((i) => [i.id, "0"]))
+  );
   const [reason, setReason] = useState("");
   const [done, setDone] = useState(false);
   const [returnResult, setReturnResult] = useState<SaleReturn | null>(null);
   const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
   const [loadingReceipt, setLoadingReceipt] = useState(false);
 
-  const selectedItems = sale.items.map((item) => ({ item, qty: parseFloat(quantities[item.id] || "0") })).filter(({ qty }) => qty > 0);
+  useEffect(() => {
+    return () => { if (receiptUrl) URL.revokeObjectURL(receiptUrl); };
+  }, [receiptUrl]);
+
+  const selectedItems = sale.items
+    .map((item) => ({ item, qty: parseFloat(quantities[item.id] || "0") }))
+    .filter(({ qty }) => qty > 0);
   const totalRefund = selectedItems.reduce((s, { item, qty }) => s + qty * item.customUnitPrice, 0);
 
   const downloadReceipt = async (returnId: string) => {
@@ -931,14 +1007,16 @@ function ReturnModal({ sale, onClose }: { sale: Sale; onClose: () => void }) {
 
   const mutation = useMutation({
     mutationFn: () => customersApi.createReturn({
-      originalSaleId: sale.id, reason: reason || undefined,
+      originalSaleId: sale.id,
+      reason: reason || undefined,
       items: selectedItems.map(({ item, qty }) => ({ saleItemId: item.id, quantity: qty, reason: reason || undefined })),
     }),
     onSuccess: async (result) => {
       toast.success("Qaytarish so'rovi yaratildi");
       qc.invalidateQueries({ queryKey: ["customer-sales"] });
       qc.invalidateQueries({ queryKey: ["customers"] });
-      setReturnResult(result); setDone(true);
+      setReturnResult(result);
+      setDone(true);
       await downloadReceipt(result.id);
     },
     onError: (e: any) => toast.error(e?.response?.data?.message ?? "Xatolik yuz berdi"),
@@ -948,7 +1026,9 @@ function ReturnModal({ sale, onClose }: { sale: Sale; onClose: () => void }) {
     return (
       <div className="space-y-3">
         <div className="bg-purple-50 border border-purple-200 rounded-xl p-4 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center flex-shrink-0"><RotateCcw size={18} className="text-purple-600" /></div>
+          <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center flex-shrink-0">
+            <RotateCcw size={18} className="text-purple-600" />
+          </div>
           <div>
             <p className="font-semibold text-purple-800 text-sm">Qaytarish yaratildi!</p>
             <p className="text-xs text-purple-600">#{returnResult?.returnNumber} · Admin tasdiqlashini kuting</p>
@@ -957,11 +1037,16 @@ function ReturnModal({ sale, onClose }: { sale: Sale; onClose: () => void }) {
         <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 text-xs text-amber-800">
           <span className="font-semibold">Eslatma:</span> Qaytarish Admin tomonidan tasdiqlanganidan keyin stok tiklanadi.
         </div>
-        {loadingReceipt ? <div className="flex items-center justify-center h-40"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600" /></div>
-          : receiptUrl ? <>
-            <div className="rounded-xl overflow-hidden border border-gray-100" style={{ height: "50vh" }}><iframe src={receiptUrl} className="w-full h-full" title="Qaytarish cheki" /></div>
-            <PdfActionButtons pdfUrl={receiptUrl} filename={`return-${returnResult?.returnNumber}.pdf`} />
-          </> : null}
+        {loadingReceipt
+          ? <div className="flex items-center justify-center h-40"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600" /></div>
+          : receiptUrl ? (
+            <>
+              <div className="rounded-xl overflow-hidden border border-gray-100" style={{ height: "50vh" }}>
+                <iframe src={receiptUrl} className="w-full h-full" title="Qaytarish cheki" />
+              </div>
+              <PdfActionButtons pdfUrl={receiptUrl} filename={`return-${returnResult?.returnNumber}.pdf`} />
+            </>
+          ) : null}
         <button onClick={onClose} className="w-full py-2.5 border-2 border-gray-200 rounded-xl text-gray-600 font-semibold text-sm hover:bg-gray-50 transition-colors">Yopish</button>
       </div>
     );
@@ -985,15 +1070,30 @@ function ReturnModal({ sale, onClose }: { sale: Sale; onClose: () => void }) {
                   <p className="text-xs font-semibold text-gray-900 leading-tight line-clamp-2">{item.productNameSnapshot}</p>
                   <p className="text-xs text-gray-400 mt-0.5">{fmt(item.customUnitPrice)} · Jami: {item.quantity} {item.unitSnapshot}</p>
                 </div>
-                {isSelected && <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-bold flex-shrink-0">-{fmt(qty * item.customUnitPrice)}</span>}
+                {isSelected && (
+                  <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-bold flex-shrink-0">-{fmt(qty * item.customUnitPrice)}</span>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-xs text-gray-500 flex-shrink-0">Qaytarish:</span>
-                <button onClick={() => { const cur = parseFloat(quantities[item.id] || "0"); if (cur > 0) setQuantities((p) => ({ ...p, [item.id]: String(cur - 1) })); }} className="w-7 h-7 rounded-lg bg-gray-100 text-gray-600 font-bold flex items-center justify-center hover:bg-gray-200 transition-colors">−</button>
-                <input type="number" min={0} max={max} step="any" value={quantities[item.id]}
-                  onChange={(e) => { const val = e.target.value; const num = parseFloat(val); if (val === "" || val === "0") { setQuantities((p) => ({ ...p, [item.id]: val })); return; } if (!isNaN(num) && num >= 0 && num <= max) setQuantities((p) => ({ ...p, [item.id]: val })); }}
-                  className="w-14 text-center text-xs border border-gray-200 rounded-lg py-1 focus:outline-none focus:border-purple-400 font-bold" />
-                <button onClick={() => { const cur = parseFloat(quantities[item.id] || "0"); if (cur < max) setQuantities((p) => ({ ...p, [item.id]: String(cur + 1) })); }} className="w-7 h-7 rounded-lg bg-gray-100 text-gray-600 font-bold flex items-center justify-center hover:bg-gray-200 transition-colors">+</button>
+                <button
+                  onClick={() => { const cur = parseFloat(quantities[item.id] || "0"); if (cur > 0) setQuantities((p) => ({ ...p, [item.id]: String(cur - 1) })); }}
+                  className="w-7 h-7 rounded-lg bg-gray-100 text-gray-600 font-bold flex items-center justify-center hover:bg-gray-200 transition-colors"
+                >−</button>
+                <input
+                  type="number" min={0} max={max} step="any" value={quantities[item.id]}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    const num = parseFloat(val);
+                    if (val === "" || val === "0") { setQuantities((p) => ({ ...p, [item.id]: val })); return; }
+                    if (!isNaN(num) && num >= 0 && num <= max) setQuantities((p) => ({ ...p, [item.id]: val }));
+                  }}
+                  className="w-14 text-center text-xs border border-gray-200 rounded-lg py-1 focus:outline-none focus:border-purple-400 font-bold"
+                />
+                <button
+                  onClick={() => { const cur = parseFloat(quantities[item.id] || "0"); if (cur < max) setQuantities((p) => ({ ...p, [item.id]: String(cur + 1) })); }}
+                  className="w-7 h-7 rounded-lg bg-gray-100 text-gray-600 font-bold flex items-center justify-center hover:bg-gray-200 transition-colors"
+                >+</button>
                 <span className="text-xs text-gray-400">/ {max}</span>
               </div>
             </div>
@@ -1002,7 +1102,8 @@ function ReturnModal({ sale, onClose }: { sale: Sale; onClose: () => void }) {
       </div>
       <div>
         <label className="text-xs font-semibold text-gray-600 mb-1.5 block">Qaytarish sababi</label>
-        <textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Masalan: mahsulot nuqsonli..." rows={2} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-purple-400 resize-none" />
+        <textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Masalan: mahsulot nuqsonli..." rows={2}
+          className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-purple-400 resize-none" />
       </div>
       {totalRefund > 0 && (
         <div className="bg-purple-50 border border-purple-200 rounded-xl p-3 flex justify-between items-center">
@@ -1012,7 +1113,14 @@ function ReturnModal({ sale, onClose }: { sale: Sale; onClose: () => void }) {
       )}
       <div className="flex gap-2 pt-1">
         <Button variant="outline" className="flex-1" onClick={onClose}>Bekor</Button>
-        <Button className="flex-1 !bg-purple-600 hover:!bg-purple-700" isLoading={mutation.isPending} disabled={selectedItems.length === 0} onClick={() => { if (selectedItems.length === 0) { toast.error("Kamida 1 ta mahsulot tanlang"); return; } mutation.mutate(); }}>Qaytarishni yuborish</Button>
+        <Button
+          className="flex-1 !bg-purple-600 hover:!bg-purple-700"
+          isLoading={mutation.isPending}
+          disabled={selectedItems.length === 0}
+          onClick={() => { if (selectedItems.length === 0) { toast.error("Kamida 1 ta mahsulot tanlang"); return; } mutation.mutate(); }}
+        >
+          Qaytarishni yuborish
+        </Button>
       </div>
     </div>
   );
@@ -1031,14 +1139,26 @@ function CustomerFormModal({ customer, onClose }: { customer?: Customer | null; 
     mutationFn: () => customer
       ? customersApi.update(customer.id, { name, phone, notes: notes || undefined })
       : customersApi.create({ name, phone, notes: notes || undefined }),
-    onSuccess: () => { toast.success(customer ? "Mijoz yangilandi" : "Mijoz qo'shildi"); qc.invalidateQueries({ queryKey: ["customers"] }); onClose(); },
+    onSuccess: () => {
+      toast.success(customer ? "Mijoz yangilandi" : "Mijoz qo'shildi");
+      qc.invalidateQueries({ queryKey: ["customers"] });
+      onClose();
+    },
     onError: (e: any) => toast.error(e?.response?.data?.message ?? "Xatolik"),
   });
 
   return (
     <div className="space-y-4">
-      <Input label="To'liq ism *" value={name} onChange={(e) => setName(e.target.value.charAt(0).toUpperCase() + e.target.value.slice(1))} placeholder="Mijoz ismi" />
-      <Input label="Telefon raqami *" value={phone} type="tel"
+      <Input
+        label="To'liq ism *"
+        value={name}
+        onChange={(e) => setName(e.target.value.charAt(0).toUpperCase() + e.target.value.slice(1))}
+        placeholder="Mijoz ismi"
+      />
+      <Input
+        label="Telefon raqami *"
+        value={phone}
+        type="tel"
         onChange={(e) => {
           let val = e.target.value.replace(/\D/g, "");
           if (val.length === 0) { setPhone("+998 "); return; }
@@ -1057,11 +1177,25 @@ function CustomerFormModal({ customer, onClose }: { customer?: Customer | null; 
       />
       <div className="space-y-1.5">
         <label className="text-sm font-medium text-gray-700">Izoh</label>
-        <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Qo'shimcha ma'lumot..." rows={3} className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none" />
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="Qo'shimcha ma'lumot..."
+          rows={3}
+          className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+        />
       </div>
       <div className="flex gap-2 pt-1">
         <Button variant="outline" className="flex-1" onClick={onClose}>Bekor</Button>
-        <Button className="flex-1" isLoading={mutation.isPending} onClick={() => { if (!name.trim()) { toast.error("Ism kiriting"); return; } if (!phone.trim()) { toast.error("Telefon kiriting"); return; } mutation.mutate(); }}>
+        <Button
+          className="flex-1"
+          isLoading={mutation.isPending}
+          onClick={() => {
+            if (!name.trim()) { toast.error("Ism kiriting"); return; }
+            if (!phone.trim()) { toast.error("Telefon kiriting"); return; }
+            mutation.mutate();
+          }}
+        >
           {customer ? "Saqlash" : "Qo'shish"}
         </Button>
       </div>
@@ -1072,14 +1206,17 @@ function CustomerFormModal({ customer, onClose }: { customer?: Customer | null; 
 // ─────────────────────────────────────────────────────────────
 // SaleReceiptModal
 // ─────────────────────────────────────────────────────────────
-function SaleReceiptModal({ saleId, saleNumber, onClose }: { saleId: string; saleNumber: string; onClose: () => void }) {
+function SaleReceiptModal({ saleId, saleNumber }: { saleId: string; saleNumber: string; onClose: () => void }) {
   const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let objectUrl: string | null = null;
     api.get(`/sales/${saleId}/receipt`, { responseType: "blob" })
-      .then((res) => { objectUrl = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" })); setReceiptUrl(objectUrl); })
+      .then((res) => {
+        objectUrl = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
+        setReceiptUrl(objectUrl);
+      })
       .catch(() => toast.error("Chek yuklanmadi"))
       .finally(() => setLoading(false));
     return () => { if (objectUrl) window.URL.revokeObjectURL(objectUrl); };
@@ -1087,11 +1224,16 @@ function SaleReceiptModal({ saleId, saleNumber, onClose }: { saleId: string; sal
 
   return (
     <div className="space-y-3">
-      {loading ? <div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" /></div>
-        : receiptUrl ? <>
-          <div className="rounded-xl overflow-hidden border border-gray-100" style={{ height: "60vh" }}><iframe src={receiptUrl} className="w-full h-full" title={`Chek #${saleNumber}`} /></div>
-          <PdfActionButtons pdfUrl={receiptUrl} filename={`chek-${saleNumber}.pdf`} />
-        </> : <p className="text-center text-gray-400 py-8">Chek topilmadi</p>}
+      {loading
+        ? <div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" /></div>
+        : receiptUrl
+          ? <>
+            <div className="rounded-xl overflow-hidden border border-gray-100" style={{ height: "60vh" }}>
+              <iframe src={receiptUrl} className="w-full h-full" title={`Chek #${saleNumber}`} />
+            </div>
+            <PdfActionButtons pdfUrl={receiptUrl} filename={`chek-${saleNumber}.pdf`} />
+          </>
+          : <p className="text-center text-gray-400 py-8">Chek topilmadi</p>}
     </div>
   );
 }
@@ -1099,10 +1241,18 @@ function SaleReceiptModal({ saleId, saleNumber, onClose }: { saleId: string; sal
 // ─────────────────────────────────────────────────────────────
 // DebtReceiptCard
 // ─────────────────────────────────────────────────────────────
-function DebtReceiptCard({ payment, debtId, saleNumber }: { payment: DebtPayment; debtId: string; saleNumber: string }) {
+function DebtReceiptCard({ payment, debtId, saleNumber }: {
+  payment: DebtPayment;
+  debtId: string;
+  saleNumber: string;
+}) {
   const [expanded, setExpanded] = useState(false);
   const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    return () => { if (receiptUrl) URL.revokeObjectURL(receiptUrl); };
+  }, [receiptUrl]);
 
   const loadReceipt = async () => {
     if (receiptUrl) return;
@@ -1114,12 +1264,17 @@ function DebtReceiptCard({ payment, debtId, saleNumber }: { payment: DebtPayment
     finally { setLoading(false); }
   };
 
-  const handleToggle = () => { setExpanded(!expanded); if (!expanded && !receiptUrl) loadReceipt(); };
+  const handleToggle = () => {
+    setExpanded(!expanded);
+    if (!expanded && !receiptUrl) loadReceipt();
+  };
 
   return (
     <div className="rounded-xl overflow-hidden border-2 border-blue-200 bg-blue-50/30">
       <div className="flex items-center gap-3 px-4 py-3 cursor-pointer" onClick={handleToggle}>
-        <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-blue-100"><Receipt size={16} className="text-blue-600" /></div>
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-blue-100">
+          <Receipt size={16} className="text-blue-600" />
+        </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <p className="font-semibold text-gray-900 text-sm">#{saleNumber}</p>
@@ -1138,11 +1293,16 @@ function DebtReceiptCard({ payment, debtId, saleNumber }: { payment: DebtPayment
       </div>
       {expanded && (
         <div className="border-t border-blue-100 px-4 py-3 space-y-3 bg-white/80">
-          {loading ? <div className="flex items-center justify-center h-32"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600" /></div>
-            : receiptUrl ? <>
-              <div className="rounded-xl overflow-hidden border border-gray-100" style={{ height: "40vh" }}><iframe src={receiptUrl} className="w-full h-full" title="Qarz to'lov cheki" /></div>
-              <PdfActionButtons pdfUrl={receiptUrl} filename={`qarz-chek-${payment.id.slice(0, 8)}.pdf`} />
-            </> : null}
+          {loading
+            ? <div className="flex items-center justify-center h-32"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600" /></div>
+            : receiptUrl
+              ? <>
+                <div className="rounded-xl overflow-hidden border border-gray-100" style={{ height: "40vh" }}>
+                  <iframe src={receiptUrl} className="w-full h-full" title="Qarz to'lov cheki" />
+                </div>
+                <PdfActionButtons pdfUrl={receiptUrl} filename={`qarz-chek-${payment.id.slice(0, 8)}.pdf`} />
+              </>
+              : null}
         </div>
       )}
     </div>
@@ -1170,7 +1330,9 @@ function SaleCard({ sale, onPayDebt, onViewReceipt, onReturn, onViewDebtPayments
     <div className={`rounded-xl overflow-hidden border-2 transition-all ${hasDebt ? "border-red-200 bg-red-50/30" : isDebtPaid ? "border-emerald-200 bg-emerald-50/20" : isReturned ? "border-purple-200 bg-purple-50/20" : "border-gray-100 bg-white"}`}>
       <div className="flex items-center gap-3 px-4 py-3 cursor-pointer" onClick={() => setExpanded(!expanded)}>
         <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${hasDebt ? "bg-red-100" : isDebtPaid ? "bg-emerald-100" : isReturned ? "bg-purple-100" : "bg-indigo-50"}`}>
-          {isReturned ? <RotateCcw size={16} className="text-purple-500" /> : <ShoppingBag size={16} className={hasDebt ? "text-red-500" : isDebtPaid ? "text-emerald-500" : "text-indigo-500"} />}
+          {isReturned
+            ? <RotateCcw size={16} className="text-purple-500" />
+            : <ShoppingBag size={16} className={hasDebt ? "text-red-500" : isDebtPaid ? "text-emerald-500" : "text-indigo-500"} />}
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
@@ -1222,10 +1384,16 @@ function SaleCard({ sale, onPayDebt, onViewReceipt, onReturn, onViewDebtPayments
                       <StatusBadge status={sale.debt.status} />
                     </div>
                     <div className="flex gap-1.5">
-                      <button onClick={() => onViewDebtPayments(sale.debt!.id, sale.debt!.originalAmount, () => onPayDebt(sale.debt!.id, sale.debt!.remainingAmount, sale.saleNumber))} className="bg-indigo-100 text-indigo-700 text-xs px-2.5 py-2 rounded-lg font-semibold hover:bg-indigo-200 transition-colors flex items-center gap-1">
+                      <button
+                        onClick={() => onViewDebtPayments(sale.debt!.id, sale.debt!.originalAmount, () => onPayDebt(sale.debt!.id, sale.debt!.remainingAmount, sale.saleNumber))}
+                        className="bg-indigo-100 text-indigo-700 text-xs px-2.5 py-2 rounded-lg font-semibold hover:bg-indigo-200 transition-colors flex items-center gap-1"
+                      >
                         <Receipt size={12} /> Tarix
                       </button>
-                      <button onClick={() => onPayDebt(sale.debt!.id, sale.debt!.remainingAmount, sale.saleNumber)} className="bg-emerald-600 text-white text-xs px-3 py-2 rounded-lg font-semibold hover:bg-emerald-700 transition-colors flex items-center gap-1">
+                      <button
+                        onClick={() => onPayDebt(sale.debt!.id, sale.debt!.remainingAmount, sale.saleNumber)}
+                        className="bg-emerald-600 text-white text-xs px-3 py-2 rounded-lg font-semibold hover:bg-emerald-700 transition-colors flex items-center gap-1"
+                      >
                         <DollarSign size={12} /> To'lash
                       </button>
                     </div>
@@ -1241,7 +1409,10 @@ function SaleCard({ sale, onPayDebt, onViewReceipt, onReturn, onViewDebtPayments
                       <p className="text-xs text-emerald-500">{fmt(sale.debt.originalAmount)}</p>
                     </div>
                   </div>
-                  <button onClick={() => onViewDebtPayments(sale.debt!.id, sale.debt!.originalAmount, () => {})} className="text-xs text-emerald-700 bg-emerald-100 px-2.5 py-1.5 rounded-lg font-semibold hover:bg-emerald-200 transition-colors flex items-center gap-1">
+                  <button
+                    onClick={() => onViewDebtPayments(sale.debt!.id, sale.debt!.originalAmount, () => {})}
+                    className="text-xs text-emerald-700 bg-emerald-100 px-2.5 py-1.5 rounded-lg font-semibold hover:bg-emerald-200 transition-colors flex items-center gap-1"
+                  >
                     <Receipt size={12} /> Cheklar
                   </button>
                 </div>
@@ -1266,11 +1437,17 @@ function SaleCard({ sale, onPayDebt, onViewReceipt, onReturn, onViewDebtPayments
           )}
           <div className="flex gap-2">
             {sale.status === "COMPLETED" && (
-              <button onClick={() => onReturn(sale)} className="flex-1 flex items-center justify-center gap-2 text-xs text-purple-600 font-semibold py-2 rounded-lg hover:bg-purple-50 transition-colors border border-purple-100">
+              <button
+                onClick={() => onReturn(sale)}
+                className="flex-1 flex items-center justify-center gap-2 text-xs text-purple-600 font-semibold py-2 rounded-lg hover:bg-purple-50 transition-colors border border-purple-100"
+              >
                 <RotateCcw size={13} /> Qaytarish
               </button>
             )}
-            <button onClick={() => onViewReceipt(sale.id, sale.saleNumber)} className="flex-1 flex items-center justify-center gap-2 text-xs text-indigo-600 font-semibold py-2 rounded-lg hover:bg-indigo-50 transition-colors border border-indigo-100">
+            <button
+              onClick={() => onViewReceipt(sale.id, sale.saleNumber)}
+              className="flex-1 flex items-center justify-center gap-2 text-xs text-indigo-600 font-semibold py-2 rounded-lg hover:bg-indigo-50 transition-colors border border-indigo-100"
+            >
               <FileText size={13} /> Chekni ko'rish
             </button>
           </div>
@@ -1284,7 +1461,10 @@ function SaleCard({ sale, onPayDebt, onViewReceipt, onReturn, onViewDebtPayments
 // CustomerDetail
 // ─────────────────────────────────────────────────────────────
 function CustomerDetail({ customer, onBack, onEdit, onDelete }: {
-  customer: Customer; onBack: () => void; onEdit: () => void; onDelete: () => void;
+  customer: Customer;
+  onBack: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
 }) {
   const [tab, setTab] = useState<"sales" | "stats">("sales");
   const [payingDebt, setPayingDebt] = useState<{ id: string; remaining: number; saleNumber?: string } | null>(null);
@@ -1304,7 +1484,7 @@ function CustomerDetail({ customer, onBack, onEdit, onDelete }: {
     queryFn: () => customersApi.getStats(customer.id),
   });
 
-  const MONTHS = ["Yan","Fev","Mar","Apr","May","Iyn","Iyl","Avg","Sen","Okt","Noy","Dek"];
+  const MONTHS = ["Yan", "Fev", "Mar", "Apr", "May", "Iyn", "Iyl", "Avg", "Sen", "Okt", "Noy", "Dek"];
   const grouped = useMemo(() => groupSalesByDate((salesData?.data as Sale[]) ?? []), [salesData]);
   const handleViewDebtPayments = useCallback((debtId: string, originalAmount: number, onPayCallback: () => void) => {
     setDebtPaymentsModal({ debtId, originalAmount, onPayCallback });
@@ -1313,7 +1493,9 @@ function CustomerDetail({ customer, onBack, onEdit, onDelete }: {
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
-        <button onClick={onBack} className="p-2 hover:bg-gray-100 rounded-xl transition-colors"><ArrowLeft size={20} className="text-gray-600" /></button>
+        <button onClick={onBack} className="p-2 hover:bg-gray-100 rounded-xl transition-colors">
+          <ArrowLeft size={20} className="text-gray-600" />
+        </button>
         <div className="flex-1 min-w-0">
           <h2 className="font-bold text-gray-900 text-lg truncate">{customer.name}</h2>
           <p className="text-sm text-gray-500 flex items-center gap-1"><Phone size={12} />{customer.phone}</p>
@@ -1332,7 +1514,10 @@ function CustomerDetail({ customer, onBack, onEdit, onDelete }: {
             <p className="text-xs text-emerald-400 font-medium">Jami</p>
             <p className="font-bold text-emerald-800 text-sm">{fmt(stats.totalAmount)}</p>
           </div>
-          <button onClick={() => stats.totalDebt > 0 && setShowDebtList(true)} className={`rounded-xl p-3 text-center transition-all ${stats.totalDebt > 0 ? "bg-red-50 hover:bg-red-100 hover:shadow-sm cursor-pointer active:scale-95" : "bg-gray-50 cursor-default"}`}>
+          <button
+            onClick={() => stats.totalDebt > 0 && setShowDebtList(true)}
+            className={`rounded-xl p-3 text-center transition-all ${stats.totalDebt > 0 ? "bg-red-50 hover:bg-red-100 hover:shadow-sm cursor-pointer active:scale-95" : "bg-gray-50 cursor-default"}`}
+          >
             <p className={`text-xs font-medium ${stats.totalDebt > 0 ? "text-red-400" : "text-gray-400"}`}>Qarz</p>
             <p className={`font-bold text-sm ${stats.totalDebt > 0 ? "text-red-700" : "text-gray-500"}`}>{fmt(stats.totalDebt)}</p>
             {stats.totalDebt > 0 && <p className="text-xs text-red-400 mt-0.5">ko'rish →</p>}
@@ -1348,7 +1533,11 @@ function CustomerDetail({ customer, onBack, onEdit, onDelete }: {
 
       <div className="flex gap-2 bg-gray-100 rounded-xl p-1">
         {[{ k: "sales", label: "Savdolar", icon: ShoppingBag }, { k: "stats", label: "Statistika", icon: BarChart2 }].map(({ k, label, icon: Icon }) => (
-          <button key={k} onClick={() => setTab(k as any)} className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all flex items-center justify-center gap-1.5 ${tab === k ? "bg-white text-indigo-600 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>
+          <button
+            key={k}
+            onClick={() => setTab(k as any)}
+            className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all flex items-center justify-center gap-1.5 ${tab === k ? "bg-white text-indigo-600 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
+          >
             <Icon size={14} />{label}
           </button>
         ))}
@@ -1356,83 +1545,105 @@ function CustomerDetail({ customer, onBack, onEdit, onDelete }: {
 
       {tab === "sales" && (
         <div className="space-y-4">
-          {salesLoading ? <div className="flex items-center justify-center h-32"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" /></div>
-            : grouped.length === 0 ? (
-              <div className="text-center py-10 text-gray-400"><ShoppingBag size={36} className="mx-auto mb-2 opacity-20" /><p className="text-sm">Savdo tarixi yo'q</p></div>
-            ) : (
-              <>
-                {grouped.map((group) => (
-                  <div key={group.date}>
-                    <div className="flex items-center gap-2 mb-2">
-                      <Calendar size={13} className="text-gray-400" />
-                      <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{group.label}</span>
-                      <div className="flex-1 h-px bg-gray-100" />
-                      <span className="text-xs text-gray-400">{group.sales.length} ta</span>
+          {salesLoading
+            ? <div className="flex items-center justify-center h-32"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" /></div>
+            : grouped.length === 0
+              ? <div className="text-center py-10 text-gray-400"><ShoppingBag size={36} className="mx-auto mb-2 opacity-20" /><p className="text-sm">Savdo tarixi yo'q</p></div>
+              : (
+                <>
+                  {grouped.map((group) => (
+                    <div key={group.date}>
+                      <div className="flex items-center gap-2 mb-2">
+                        <Calendar size={13} className="text-gray-400" />
+                        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{group.label}</span>
+                        <div className="flex-1 h-px bg-gray-100" />
+                        <span className="text-xs text-gray-400">{group.sales.length} ta</span>
+                      </div>
+                      <div className="space-y-2">
+                        {group.sales.map((sale) => (
+                          <div key={sale.id}>
+                            <SaleCard
+                              sale={sale}
+                              onPayDebt={(id, remaining, saleNum) => setPayingDebt({ id, remaining, saleNumber: saleNum })}
+                              onViewReceipt={(id, number) => setViewingReceipt({ id, number })}
+                              onReturn={(s) => setReturningItem(s)}
+                              onViewDebtPayments={handleViewDebtPayments}
+                            />
+                            {sale.debt?.payments && sale.debt.payments.length > 0 && (
+                              <div className="mt-1.5 ml-3 space-y-1.5 border-l-2 border-blue-200 pl-3">
+                                {sale.debt.payments
+                                  .sort((a: DebtPayment, b: DebtPayment) =>
+                                    new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+                                  )
+                                  .map((payment: DebtPayment) => (
+                                    <DebtReceiptCard
+                                      key={payment.id}
+                                      payment={payment}
+                                      debtId={sale.debt!.id}
+                                      saleNumber={sale.saleNumber}
+                                    />
+                                  ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                    <div className="space-y-2">
-                      {group.sales.map((sale) => (
-                        <div key={sale.id}>
-                          <SaleCard
-                            sale={sale}
-                            onPayDebt={(id, remaining, saleNum) => setPayingDebt({ id, remaining, saleNumber: saleNum })}
-                            onViewReceipt={(id, number) => setViewingReceipt({ id, number })}
-                            onReturn={(s) => setReturningItem(s)}
-                            onViewDebtPayments={handleViewDebtPayments}
-                          />
-                          {sale.debt?.payments && sale.debt.payments.length > 0 && (
-                            <div className="mt-1.5 ml-3 space-y-1.5 border-l-2 border-blue-200 pl-3">
-                              {sale.debt.payments
-                                .sort((a: DebtPayment, b: DebtPayment) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
-                                .map((payment: DebtPayment) => (
-                                  <DebtReceiptCard key={payment.id} payment={payment} debtId={sale.debt!.id} saleNumber={sale.saleNumber} />
-                                ))}
-                            </div>
-                          )}
-                        </div>
-                      ))}
+                  ))}
+                  {(salesData?.total ?? 0) > 20 && (
+                    <div className="flex items-center justify-between pt-2">
+                      <Button variant="outline" size="sm" onClick={() => setSalesPage((p) => Math.max(1, p - 1))} disabled={salesPage === 1}>Oldingi</Button>
+                      <span className="text-sm text-gray-500">{salesPage} / {Math.ceil((salesData?.total ?? 0) / 20)}</span>
+                      <Button variant="outline" size="sm" onClick={() => setSalesPage((p) => p + 1)} disabled={salesPage >= Math.ceil((salesData?.total ?? 0) / 20)}>Keyingi</Button>
                     </div>
-                  </div>
-                ))}
-                {(salesData?.total ?? 0) > 20 && (
-                  <div className="flex items-center justify-between pt-2">
-                    <Button variant="outline" size="sm" onClick={() => setSalesPage((p) => Math.max(1, p - 1))} disabled={salesPage === 1}>Oldingi</Button>
-                    <span className="text-sm text-gray-500">{salesPage} / {Math.ceil((salesData?.total ?? 0) / 20)}</span>
-                    <Button variant="outline" size="sm" onClick={() => setSalesPage((p) => p + 1)} disabled={salesPage >= Math.ceil((salesData?.total ?? 0) / 20)}>Keyingi</Button>
-                  </div>
-                )}
-              </>
-            )}
+                  )}
+                </>
+              )}
         </div>
       )}
 
       {tab === "stats" && (
         <div className="space-y-3">
-          {statsLoading ? <div className="flex items-center justify-center h-32"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" /></div>
+          {statsLoading
+            ? <div className="flex items-center justify-center h-32"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" /></div>
             : stats ? (
               <>
                 <div className="grid grid-cols-2 gap-2">
-                  <div className="bg-white border border-gray-100 rounded-xl p-3"><p className="text-xs text-gray-400 mb-1">O'rtacha buyurtma</p><p className="font-bold text-gray-900">{fmt(stats.averageOrderValue)}</p></div>
-                  <div className="bg-white border border-gray-100 rounded-xl p-3"><p className="text-xs text-gray-400 mb-1">Ro'yxatga olingan</p><p className="font-bold text-gray-900">{format(parseISO(customer.createdAt), "dd.MM.yyyy")}</p></div>
+                  <div className="bg-white border border-gray-100 rounded-xl p-3">
+                    <p className="text-xs text-gray-400 mb-1">O'rtacha buyurtma</p>
+                    <p className="font-bold text-gray-900">{fmt(stats.averageOrderValue)}</p>
+                  </div>
+                  <div className="bg-white border border-gray-100 rounded-xl p-3">
+                    <p className="text-xs text-gray-400 mb-1">Ro'yxatga olingan</p>
+                    <p className="font-bold text-gray-900">{format(parseISO(customer.createdAt), "dd.MM.yyyy")}</p>
+                  </div>
                 </div>
                 <div className="bg-white border border-gray-100 rounded-xl p-4">
-                  <p className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2"><TrendingUp size={16} className="text-indigo-500" /> Oylik statistika</p>
-                  {Object.keys(stats.monthlyStats).length === 0 ? <p className="text-sm text-gray-400 text-center py-4">Ma'lumot yo'q</p> : (
-                    <div className="space-y-2 max-h-60 overflow-y-auto">
-                      {Object.entries(stats.monthlyStats).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 12).map(([key, val]) => {
-                        const [year, month] = key.split("-");
-                        return (
-                          <div key={key} className="flex items-center gap-3">
-                            <span className="text-xs text-gray-500 w-16 flex-shrink-0">{MONTHS[parseInt(month) - 1]} {year}</span>
-                            <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
-                              <div className="bg-indigo-500 h-full rounded-full transition-all" style={{ width: `${Math.min(100, (val.amount / (stats.totalAmount || 1)) * 100 * 3)}%` }} />
-                            </div>
-                            <span className="text-xs font-semibold text-gray-700 w-20 text-right flex-shrink-0">{fmt(val.amount)}</span>
-                            <span className="text-xs text-gray-400 w-8 flex-shrink-0">{val.count}ta</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
+                  <p className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                    <TrendingUp size={16} className="text-indigo-500" /> Oylik statistika
+                  </p>
+                  {Object.keys(stats.monthlyStats).length === 0
+                    ? <p className="text-sm text-gray-400 text-center py-4">Ma'lumot yo'q</p>
+                    : (
+                      <div className="space-y-2 max-h-60 overflow-y-auto">
+                        {Object.entries(stats.monthlyStats)
+                          .sort((a, b) => b[0].localeCompare(a[0]))
+                          .slice(0, 12)
+                          .map(([key, val]) => {
+                            const [year, month] = key.split("-");
+                            return (
+                              <div key={key} className="flex items-center gap-3">
+                                <span className="text-xs text-gray-500 w-16 flex-shrink-0">{MONTHS[parseInt(month) - 1]} {year}</span>
+                                <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
+                                  <div className="bg-indigo-500 h-full rounded-full transition-all" style={{ width: `${Math.min(100, (val.amount / (stats.totalAmount || 1)) * 100 * 3)}%` }} />
+                                </div>
+                                <span className="text-xs font-semibold text-gray-700 w-20 text-right flex-shrink-0">{fmt(val.amount)}</span>
+                                <span className="text-xs text-gray-400 w-8 flex-shrink-0">{val.count}ta</span>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    )}
                 </div>
               </>
             ) : null}
@@ -1440,13 +1651,26 @@ function CustomerDetail({ customer, onBack, onEdit, onDelete }: {
       )}
 
       <Modal isOpen={showDebtList} onClose={() => setShowDebtList(false)} title="Faol qarzlar" size="sm">
-        <DebtListModal customerId={customer.id} customerName={customer.name} customerPhone={customer.phone} onClose={() => setShowDebtList(false)} onPayDebt={(id, remaining, saleNum) => { setShowDebtList(false); setPayingDebt({ id, remaining, saleNumber: saleNum }); }} />
+        <DebtListModal
+          customerId={customer.id}
+          customerName={customer.name}
+          customerPhone={customer.phone}
+          onClose={() => setShowDebtList(false)}
+          onPayDebt={(id, remaining, saleNum) => { setShowDebtList(false); setPayingDebt({ id, remaining, saleNumber: saleNum }); }}
+        />
       </Modal>
       <Modal isOpen={!!payingDebt} onClose={() => setPayingDebt(null)} title={`Qarz to'lovi${payingDebt?.saleNumber ? ` — #${payingDebt.saleNumber}` : ""}`} size="sm">
         {payingDebt && <PayDebtModal debtId={payingDebt.id} remaining={payingDebt.remaining} saleNumber={payingDebt.saleNumber} onClose={() => setPayingDebt(null)} />}
       </Modal>
       <Modal isOpen={!!debtPaymentsModal} onClose={() => setDebtPaymentsModal(null)} title="Qarz to'lovlar tarixi" size="sm">
-        {debtPaymentsModal && <DebtPaymentsHistoryModal debtId={debtPaymentsModal.debtId} originalAmount={debtPaymentsModal.originalAmount} onClose={() => setDebtPaymentsModal(null)} onPayDebt={() => { const cb = debtPaymentsModal.onPayCallback; setDebtPaymentsModal(null); cb(); }} />}
+        {debtPaymentsModal && (
+          <DebtPaymentsHistoryModal
+            debtId={debtPaymentsModal.debtId}
+            originalAmount={debtPaymentsModal.originalAmount}
+            onClose={() => setDebtPaymentsModal(null)}
+            onPayDebt={() => { const cb = debtPaymentsModal.onPayCallback; setDebtPaymentsModal(null); cb(); }}
+          />
+        )}
       </Modal>
       <Modal isOpen={!!viewingReceipt} onClose={() => setViewingReceipt(null)} title={`Chek #${viewingReceipt?.number}`} size="md">
         {viewingReceipt && <SaleReceiptModal saleId={viewingReceipt.id} saleNumber={viewingReceipt.number} onClose={() => setViewingReceipt(null)} />}
@@ -1499,9 +1723,25 @@ export function CustomersPage() {
   if (selected) {
     return (
       <div className="space-y-4">
-        <CustomerDetail customer={selected} onBack={() => setSelected(null)} onEdit={() => { setEditTarget(selected); setShowForm(true); }} onDelete={() => setDeleteTarget(selected)} />
+        <CustomerDetail
+          customer={selected}
+          onBack={() => setSelected(null)}
+          onEdit={() => { setEditTarget(selected); setShowForm(true); }}
+          onDelete={() => setDeleteTarget(selected)}
+        />
         <Modal isOpen={showForm && !!editTarget} onClose={() => { setShowForm(false); setEditTarget(null); }} title="Mijozni tahrirlash" size="sm">
-          {editTarget && <CustomerFormModal customer={editTarget} onClose={() => { setShowForm(false); setEditTarget(null); qc.invalidateQueries({ queryKey: ["customers"] }).then(() => { customersApi.getOne(selected.id).then(setSelected).catch(() => {}); }); }} />}
+          {editTarget && (
+            <CustomerFormModal
+              customer={editTarget}
+              onClose={() => {
+                setShowForm(false);
+                setEditTarget(null);
+                qc.invalidateQueries({ queryKey: ["customers"] }).then(() => {
+                  customersApi.getOne(selected.id).then(setSelected).catch(() => {});
+                });
+              }}
+            />
+          )}
         </Modal>
         <Modal isOpen={!!deleteTarget} onClose={() => setDeleteTarget(null)} title="O'chirishni tasdiqlash" size="sm">
           <div className="space-y-4">
@@ -1518,7 +1758,6 @@ export function CustomersPage() {
 
   return (
     <div className="space-y-4">
-      {/* ── 30 kundan oshgan qarzlar banneri ── */}
       <OverdueDebtsBanner customers={customers} onSelect={(c) => setSelected(c)} />
 
       <div className="flex items-center justify-between">
@@ -1548,10 +1787,21 @@ export function CustomersPage() {
       </div>
 
       <div className="space-y-2">
-        <Input placeholder="Ism yoki telefon bo'yicha qidirish..." icon={<Search size={16} />} value={search} onChange={(e) => setSearch(e.target.value)} />
+        <Input
+          placeholder="Ism yoki telefon bo'yicha qidirish..."
+          icon={<Search size={16} />}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
         <div className="flex gap-1.5">
           {[{ k: "all", l: "Barchasi" }, { k: "debt", l: "Qarzdorlar" }, { k: "paid", l: "To'langan" }].map(({ k, l }) => (
-            <button key={k} onClick={() => setFilter(k as any)} className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${filter === k ? "bg-indigo-600 text-white" : "bg-white border border-gray-200 text-gray-600 hover:border-indigo-300"}`}>{l}</button>
+            <button
+              key={k}
+              onClick={() => setFilter(k as any)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${filter === k ? "bg-indigo-600 text-white" : "bg-white border border-gray-200 text-gray-600 hover:border-indigo-300"}`}
+            >
+              {l}
+            </button>
           ))}
         </div>
       </div>
@@ -1569,7 +1819,11 @@ export function CustomersPage() {
           {filtered.map((c: any) => {
             const debt = c.totalDebt ?? 0;
             return (
-              <div key={c.id} onClick={() => setSelected(c)} className={`rounded-xl border px-4 py-3 flex items-center gap-3 cursor-pointer transition-all ${debt > 0 ? "bg-red-50/50 border-red-200 hover:border-red-300 hover:shadow-sm" : "bg-white border-gray-100 hover:border-indigo-300 hover:shadow-sm"}`}>
+              <div
+                key={c.id}
+                onClick={() => setSelected(c)}
+                className={`rounded-xl border px-4 py-3 flex items-center gap-3 cursor-pointer transition-all ${debt > 0 ? "bg-red-50/50 border-red-200 hover:border-red-300 hover:shadow-sm" : "bg-white border-gray-100 hover:border-indigo-300 hover:shadow-sm"}`}
+              >
                 <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${debt > 0 ? "bg-red-100" : "bg-indigo-50"}`}>
                   <User size={18} className={debt > 0 ? "text-red-500" : "text-indigo-500"} />
                 </div>
@@ -1578,7 +1832,8 @@ export function CustomersPage() {
                   <p className="text-xs text-gray-400 flex items-center gap-1"><Phone size={10} />{c.phone}</p>
                 </div>
                 <div className="text-right flex-shrink-0">
-                  {debt > 0 ? <><p className="font-bold text-red-600 text-sm">{fmt(debt)}</p><p className="text-xs text-red-400">qarz</p></>
+                  {debt > 0
+                    ? <><p className="font-bold text-red-600 text-sm">{fmt(debt)}</p><p className="text-xs text-red-400">qarz</p></>
                     : <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-semibold">To'langan</span>}
                 </div>
                 <ChevronRight size={16} className="text-gray-300 flex-shrink-0" />

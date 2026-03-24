@@ -13,6 +13,7 @@ import {
   Put,
   Query,
   UseGuards,
+  Res,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { SalesService } from './sale.service';
@@ -30,22 +31,20 @@ import { CurrentUser } from '../common/decarators/current.user.decarator';
 import { UserRole } from '../common/dto/roles.enum';
 import { UserEntity } from '../user/entities/user.entity';
 import { PaginationDto } from '../common/dto/pagination.dto';
-import { Res } from '@nestjs/common';
 import express from 'express';
 import { ReceiptService } from './resipt.service';
-
 
 @ApiTags('Sales')
 @Controller('api/v1/sales')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @ApiBearerAuth()
 export class SalesController {
- constructor(
+  constructor(
     private readonly salesService: SalesService,
     private readonly receiptService: ReceiptService,
   ) {}
 
-  // ─── Create Sale (DRAFT) – Both ADMIN and SALER ────────
+  // ─── Create Sale (DRAFT) ───────────────────────────────────
   @Post()
   @Roles(UserRole.ADMIN, UserRole.SALER)
   @HttpCode(HttpStatus.CREATED)
@@ -55,10 +54,10 @@ export class SalesController {
     return this.salesService.createSale(dto, user.id);
   }
 
-  // ─── Update Sale Items (DRAFT only) – Both roles ───────
+  // ─── Update Sale Items (DRAFT only) ───────────────────────
   @Put(':id/items')
   @Roles(UserRole.ADMIN, UserRole.SALER)
-  @ApiOperation({ summary: 'Update sale items (DRAFT only). SALER can only change customUnitPrice and discountAmount.' })
+  @ApiOperation({ summary: 'Update sale items (DRAFT only).' })
   @ApiResponse({ status: 200, description: 'Sale updated' })
   async updateItems(
     @Param('id') saleId: string,
@@ -68,11 +67,13 @@ export class SalesController {
     return this.salesService.updateSale(saleId, dto, user.id, user.role);
   }
 
-  // ─── Complete Sale – Both roles ─────────────────────────
+  // ─── Complete Sale ─────────────────────────────────────────
   @Post(':id/complete')
   @Roles(UserRole.ADMIN, UserRole.SALER)
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Complete a DRAFT sale. Decreases inventory and records payments.' })
+  @ApiOperation({
+    summary: 'Complete a DRAFT sale. Returns debtSummary with previousDebt, currentSaleDebt, totalDebtAfter.',
+  })
   @ApiResponse({ status: 200, description: 'Sale completed' })
   @ApiResponse({ status: 400, description: 'Insufficient stock or payment mismatch' })
   async complete(
@@ -83,11 +84,11 @@ export class SalesController {
     return this.salesService.completeSale(saleId, dto, user.id);
   }
 
-  // ─── Cancel Sale – ADMIN only ───────────────────────────
+  // ─── Cancel Sale (ADMIN only) ──────────────────────────────
   @Post(':id/cancel')
   @Roles(UserRole.ADMIN)
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Cancel a sale (ADMIN only). Reverses inventory if sale was COMPLETED.' })
+  @ApiOperation({ summary: 'Cancel a sale (ADMIN only). Reverses inventory if COMPLETED.' })
   @ApiResponse({ status: 200, description: 'Sale cancelled' })
   async cancel(
     @Param('id') saleId: string,
@@ -97,10 +98,10 @@ export class SalesController {
     return this.salesService.cancelSale(saleId, dto, user.id);
   }
 
-  // ─── List Sales – ADMIN sees all, SALER sees only their own ──
+  // ─── List Sales ────────────────────────────────────────────
   @Get()
   @Roles(UserRole.ADMIN, UserRole.SALER)
-  @ApiOperation({ summary: 'List sales. SALER sees only their sales.' })
+  @ApiOperation({ summary: 'List sales.' })
   @ApiQuery({ name: 'status', enum: SaleStatus, required: false })
   async findAll(
     @Query() pagination: PaginationDto,
@@ -109,7 +110,7 @@ export class SalesController {
     return this.salesService.findAll(pagination);
   }
 
-  // ─── Get Sale by ID ─────────────────────────────────────
+  // ─── Get Sale by ID ────────────────────────────────────────
   @Get(':id')
   @Roles(UserRole.ADMIN, UserRole.SALER)
   @ApiOperation({ summary: 'Get sale details by ID' })
@@ -119,19 +120,23 @@ export class SalesController {
     return this.salesService.findById(saleId);
   }
 
+  // ─── Receipt ───────────────────────────────────────────────
   @Get(':id/receipt')
-@Roles(UserRole.ADMIN, UserRole.SALER)
-@ApiOperation({ summary: 'Generate PDF receipt for completed sale' })
-async getReceipt(
-  @Param('id') saleId: string,
-  @Res() res: express.Response,
-) {
-  const sale = await this.salesService.findById(saleId);
+  @Roles(UserRole.ADMIN, UserRole.SALER)
+  @ApiOperation({ summary: 'Generate PDF receipt for completed sale' })
+  async getReceipt(
+    @Param('id') saleId: string,
+    @Res() res: express.Response,
+  ) {
+    // Load sale with freshly recomputed debtSummary so receipt always
+    // shows correct previousDebt / currentSaleDebt / totalDebtAfter
+    // regardless of when this endpoint is called relative to completion.
+    const sale = await this.salesService.getSaleWithDebtSummary(saleId);
 
-  if (sale.status !== SaleStatus.COMPLETED) {
-    throw new BadRequestException('Receipt available only for completed sales');
+    if (sale.status !== SaleStatus.COMPLETED) {
+      throw new BadRequestException('Receipt available only for completed sales');
+    }
+
+    return this.receiptService.generateReceipt(sale, res);
   }
-
-  return this.receiptService.generateReceipt(sale, res);
-}
 }
