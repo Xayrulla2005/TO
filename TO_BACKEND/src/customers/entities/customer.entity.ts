@@ -4,9 +4,7 @@ import {
   Column,
   CreateDateColumn,
   UpdateDateColumn,
-  OneToMany,
 } from 'typeorm';
-import { SaleEntity } from '../../sale/entities/sale.entity';
 
 @Entity('customers')
 export class CustomerEntity {
@@ -27,8 +25,4 @@ export class CustomerEntity {
 
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt!: Date;
-
-  @OneToMany(() => SaleEntity, (sale) => sale.customer)
-  sales?: SaleEntity[];
-  totalDebt: number;
 }

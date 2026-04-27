@@ -5,7 +5,7 @@ import { PassportStrategy } from '@nestjs/passport';
 import { Strategy, ExtractJwt } from 'passport-jwt';
 import { config } from 'dotenv';
 import { UserEntity } from '../user/entities/user.entity';
-import { UserRole } from 'src/common/dto/roles.enum';
+import { UserRole } from '../common/dto/roles.enum';
 
 config();
 

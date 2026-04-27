@@ -57,7 +57,7 @@ export class BootstrapAdminService implements OnModuleInit {
 
     this.logger.log(
       `Admin yaratildi: fullName=${fullName}, phone=${phone}`,
-    );
+    );  
   }
 
   async create(dto: CreateUserDto) {

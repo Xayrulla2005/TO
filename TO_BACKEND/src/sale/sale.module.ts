@@ -7,9 +7,9 @@ import { PaymentEntity } from '../payments/entities/payment.entity';
 import { DebtEntity } from '../debts/entities/debt.entity';
 import { InventoryTransactionEntity } from '../inventory/entities/inventory.entity';
 import { SalesService } from './sale.service';
+import { ReceiptService } from './resipt.service';
 import { SalesController } from './sale.controller';
 import { CommonModule } from '../common/common.module';
-import { ReceiptService } from './resipt.service';
 
 @Module({
   imports: [
@@ -23,10 +23,7 @@ import { ReceiptService } from './resipt.service';
     ]),
     CommonModule,
   ],
-  providers: [
-    SalesService,
-    ReceiptService,
-  ],
+  providers: [SalesService, ReceiptService],
   controllers: [SalesController],
   exports: [SalesService],
 })

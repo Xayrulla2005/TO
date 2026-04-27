@@ -375,14 +375,14 @@ export class SalesService {
 
       // ── Debt summary — capture previousDebt BEFORE updating ─
       const previousDebt = customer
-        ? parseFloat(Number(customer.totalDebt || 0).toFixed(4))
+        ? parseFloat(Number(0 || 0).toFixed(4))
         : 0;
       const currentSaleDebt = debtPayment
         ? parseFloat(Number(debtPayment.amount).toFixed(4))
         : 0;
       const totalDebtAfter = parseFloat((previousDebt + currentSaleDebt).toFixed(4));
 
-      // ── Update customer.totalDebt ───────────────────────────
+      // ── Update 0 ───────────────────────────
       if (customer && debtPayment) {
         await queryRunner.query(
           `UPDATE customers SET total_debt = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
@@ -518,14 +518,14 @@ export class SalesService {
         const debtPayment = sale.payments?.find(
           (p) => p.method === PaymentMethod.DEBT,
         );
-        if (debtPayment && sale.customer) {
-          const currentDebt = parseFloat(Number(sale.customer.totalDebt || 0).toFixed(4));
+        if (debtPayment && sale.customerId) {
+          const currentDebt = parseFloat(Number(0 || 0).toFixed(4));
           const newDebt = parseFloat(
             Math.max(0, currentDebt - parseFloat(Number(debtPayment.amount).toFixed(4))).toFixed(4),
           );
           await queryRunner.query(
             `UPDATE customers SET total_debt = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
-            [newDebt, sale.customer.id],
+            [newDebt, sale.customerId],
           );
         }
       }
@@ -573,7 +573,7 @@ export class SalesService {
     // totalDebtAfter — customer's current total debt (already updated by completeSale)
     const customer = (sale as any).customer as CustomerEntity | null | undefined;
     const totalDebtAfter = customer
-      ? parseFloat(Number(customer.totalDebt || 0).toFixed(4))
+      ? parseFloat(Number(0 || 0).toFixed(4))
       : currentSaleDebt > 0 && sale.debt
         ? parseFloat(Number(sale.debt.remainingAmount || 0).toFixed(4))
         : 0;
@@ -615,7 +615,7 @@ export class SalesService {
   async findOne(id: string): Promise<SaleEntity> {
     const sale = await this.saleRepository.findOne({
       where: { id },
-      relations: ['createdBy', 'items', 'items.product', 'payments', 'debt', 'customer'],
+      relations: ['createdBy', 'items', 'items.product', 'payments', 'debt'],
     });
     if (!sale) throw new NotFoundException('Sale not found');
     return sale;

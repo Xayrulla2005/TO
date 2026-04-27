@@ -1,5 +1,5 @@
 import { IsEnum, IsOptional, IsString } from 'class-validator';
-import { PaginationDto } from 'src/common/dto/pagination.dto';
+import { PaginationDto } from '../../common/dto/pagination.dto';
 import { DebtStatus } from '../entities/debt.entity';
 
 export class DebtQueryDto extends PaginationDto {

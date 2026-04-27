@@ -5,7 +5,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decarators/roles.decarator';
 import { UserRole } from '../common/dto/roles.enum';
 import { PaymentsService } from './payments.service';
-import { PaginationDto } from 'src/common/dto/pagination.dto';
+import { PaginationDto } from '../common/dto/pagination.dto';
 
 @ApiTags('Payments')
 @Controller('api/v1/payments')

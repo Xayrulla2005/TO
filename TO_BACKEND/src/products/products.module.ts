@@ -11,6 +11,9 @@ import { ProductsController } from './products.controller';
 import { ImageService } from './services/image.service';
 import { CommonModule } from '../common/common.module';
 import { multerOptions } from './config/multer.config';
+import { SupabaseStorageService } from '../shared/supabase/supabase-storage.service';
+
+
 
 @Module({
   imports: [
@@ -18,7 +21,7 @@ import { multerOptions } from './config/multer.config';
     MulterModule.register(multerOptions),
     CommonModule,
   ],
-  providers: [ProductsService, ImageService],
+  providers: [ProductsService, ImageService,SupabaseStorageService],
   controllers: [ProductsController],
   exports: [ProductsService, ImageService],
 })

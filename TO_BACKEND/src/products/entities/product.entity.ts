@@ -1,3 +1,4 @@
+export class Product {}
 import {
   Column,
   CreateDateColumn,
@@ -15,18 +16,10 @@ import { SaleItemEntity } from '../../sale/entities/sale.item.entity';
 import { InventoryTransactionEntity } from '../../inventory/entities/inventory.entity';
 
 export enum ProductUnit {
-  PIECE = 'piece',
   METER = 'meter',
-  KG    = 'kg',
-  LITRE = 'litre',
+  PIECE = 'piece',
+  PACK = 'pack',
 }
-
-export const PRODUCT_UNIT_LABELS: Record<ProductUnit, string> = {
-  [ProductUnit.PIECE]: 'dona',
-  [ProductUnit.METER]: 'metr',
-  [ProductUnit.KG]:    'kg',
-  [ProductUnit.LITRE]: 'litr',
-};
 
 @Entity('products')
 @Check('"purchase_price" >= 0')
@@ -39,44 +32,41 @@ export class ProductEntity {
   @Column({ type: 'varchar', length: 200 })
   name!: string;
 
-  @ManyToOne(() => CategoryEntity, (cat) => cat.products, {
-    eager: true,
-    onDelete: 'SET NULL',
-    nullable: true,
-  })
+  @ManyToOne(() => CategoryEntity, (cat) => cat.products, { eager: true, onDelete: 'SET NULL', nullable: true })
   @JoinColumn({ name: 'category_id' })
   category?: CategoryEntity | null;
 
   @Column({ type: 'uuid', nullable: true, name: 'category_id' })
   categoryId?: string | null;
 
-  @Column({ type: 'numeric', precision: 12, scale: 2, default: 0, name: 'purchase_price' })
-  purchasePrice!: number;
+  @Column({
+  type: "numeric",
+  precision: 12,
+  scale: 2,
+  default: 0,
+  name: "purchase_price",
+})
+purchasePrice!: number;
 
-  @Column({ type: 'numeric', precision: 12, scale: 2, default: 0, name: 'sale_price' })
-  salePrice!: number;
+  @Column({
+  type: "numeric",
+  precision: 12,
+  scale: 2,
+  default: 0,
+  name: "sale_price",
+})
+salePrice!: number;
 
   @Column({ type: 'varchar', length: 500, nullable: true })
-  imageUrl?: string | null;
+  imageUrl?: string | null; // Relative path to uploaded image
 
-  @Column({
-    type: 'enum',
-    enum: ProductUnit,
-    default: ProductUnit.PIECE,
-  })
+  @Column({ type: 'varchar', length: 20, default: ProductUnit.PIECE })
   unit!: ProductUnit;
 
-  // ✅ INT → NUMERIC: metr/kg/litr uchun 1.5, 2.75 bo'lishi mumkin
-  @Column({
-    name: 'stock_quantity',
-    type: 'numeric',
-    precision: 12,
-    scale: 3,   // 3 xonagacha: 1.500 metr
-    default: 0,
-  })
-  stockQuantity!: number;
+  @Column({ name: "stock_quantity", type: "int", default: 0 })
+stockQuantity!: number;
 
-  @Column({ type: 'numeric', precision: 12, scale: 3, default: 0, name: 'min_stock_limit' })
+  @Column({ type: 'numeric', precision: 12, scale: 2, default: 0, name: 'min_stock_limit' })
   minStockLimit!: number;
 
   @CreateDateColumn({ name: 'created_at' })
@@ -88,12 +78,14 @@ export class ProductEntity {
   @DeleteDateColumn({ name: 'deleted_at' })
   deletedAt?: Date | null;
 
+  // Relations
   @OneToMany(() => SaleItemEntity, (item) => item.product)
   saleItems?: SaleItemEntity[];
 
   @OneToMany(() => InventoryTransactionEntity, (tx) => tx.product)
   inventoryTransactions?: InventoryTransactionEntity[];
 
+  // Helper: is stock below minimum?
   get isLowStock(): boolean {
     return Number(this.stockQuantity) <= Number(this.minStockLimit);
   }

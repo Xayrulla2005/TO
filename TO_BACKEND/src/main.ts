@@ -28,18 +28,26 @@ async function bootstrap(): Promise<void> {
   .split(",")
   .map((x) => x.trim());
 
-
+app.enableCors({
+  origin: corsOrigins,
+  credentials: true,
+});
 
   // ── Security Headers (Helmet) ───────────────────────────
   app.use(helmet());
 
   // ── CORS ────────────────────────────────────────────────
   app.enableCors({
-  origin: corsOrigins,
-  credentials: true,
-  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
-  allowedHeaders: ['Content-Type','Authorization'],
-});
+    origin: corsOrigins,
+    methods: (process.env.CORS_METHODS || "GET,POST,PUT,PATCH,DELETE").split(
+      ",",
+    ),
+    allowedHeaders: (
+      process.env.CORS_ALLOWED_HEADERS || "Content-Type,Authorization"
+    ).split(","),
+    credentials: true, // Required for httpOnly cookies
+    maxAge: 86400, // 24 hours
+  });
 
   // ── Cookie Parser ───────────────────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-require-imports

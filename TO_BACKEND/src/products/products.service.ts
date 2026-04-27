@@ -16,7 +16,7 @@ import { PaginationDto, PaginatedResponseDto } from '../common/dto/pagination.dt
 import { ImageService } from './services/image.service';
 import { AuditLogService } from '../audit-logs/audit-logs.service';
 import { AuditAction, AuditEntity } from '../audit-logs/entities/audit-log.entity';
-import { ProductQueryDto } from 'src/common/dto/pagination.query.dto';
+import { ProductQueryDto } from '../common/dto/pagination.query.dto';
 
 @Injectable()
 export class ProductsService {

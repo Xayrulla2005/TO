@@ -20,12 +20,10 @@ import { CurrentUser } from '../common/decarators/current.user.decarator';
 import { UserRole } from '../common/dto/roles.enum';
 import { UserEntity } from '../user/entities/user.entity';
 import { CategoriesService } from './categories.service';
-import { PaginationDto } from 'src/common/dto/pagination.dto';
+import { PaginationDto } from '../common/dto/pagination.dto';
 import { CreateCategoryDto, UpdateCategoryDto } from './dto/create-category.dto';
-import { Unique } from 'typeorm';
 
 @ApiTags('Categories')
-@Unique(['name'])
 @Controller('api/v1/categories')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @ApiBearerAuth()

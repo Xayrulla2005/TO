@@ -1,30 +1,24 @@
-// src/debts/dto/make.payment.dto.ts
+// src/debts/dto/make-payment.dto.ts
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsNumber, IsPositive, IsOptional, IsString, IsEnum } from 'class-validator';
+import { IsEnum, IsNumber, IsOptional, IsString, Min } from 'class-validator';
 
-export enum PaymentMethod {
+export enum DebtPaymentMethod {
   CASH = 'CASH',
   CARD = 'CARD',
 }
 
 export class MakePaymentDto {
-  @ApiProperty({ description: "To'lov summasi", example: 50000 })
+  @ApiProperty({ example: 50000 })
   @IsNumber()
-  @IsPositive()
+  @Min(1)
   amount!: number;
 
-  @ApiPropertyOptional({ description: "To'lov usuli", enum: PaymentMethod, default: PaymentMethod.CASH })
-  @IsOptional()
-  @IsEnum(PaymentMethod)
-  paymentMethod?: PaymentMethod;
+  @ApiProperty({ enum: DebtPaymentMethod })
+  @IsEnum(DebtPaymentMethod)
+  paymentMethod!: DebtPaymentMethod;
 
-  @ApiPropertyOptional({ description: 'Izoh' })
+  @ApiPropertyOptional()
   @IsOptional()
   @IsString()
   note?: string;
-
-  @ApiPropertyOptional({ description: 'Izoh (alias)' })
-  @IsOptional()
-  @IsString()
-  notes?: string;
 }
