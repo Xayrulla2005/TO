@@ -1,3 +1,4 @@
+// src/debts/entities/debt.entity.ts
 import { SaleEntity } from '../../sale/entities/sale.entity';
 import {
   Column as Col2,
@@ -7,13 +8,16 @@ import {
   OneToOne as OTO2,
   JoinColumn as JC2,
   UpdateDateColumn as UDC2,
+  ManyToOne,
+  JoinColumn,
 } from 'typeorm';
+import { CustomerEntity } from '../../customers/entities/customer.entity';
 
 export enum DebtStatus {
-  PENDING = 'PENDING',
+  PENDING        = 'PENDING',
   PARTIALLY_PAID = 'PARTIALLY_PAID',
-  PAID = 'PAID',
-  CANCELLED = 'CANCELLED',
+  PAID           = 'PAID',
+  CANCELLED      = 'CANCELLED',
 }
 
 @Ent2('debts')
@@ -24,8 +28,9 @@ export class DebtEntity {
   @Col2({ type: 'varchar', length: 150, name: 'debtor_name' })
   debtorName!: string;
 
-  @Col2({ type: 'varchar', length: 20, name: 'debtor_phone' })
-  debtorPhone!: string;
+  // ✅ nullable: true — telefon bo'lmasa ham saqlash mumkin
+  @Col2({ type: 'varchar', length: 30, name: 'debtor_phone', nullable: true })
+  debtorPhone?: string | null;
 
   @Col2({ type: 'numeric', precision: 14, scale: 2, name: 'original_amount' })
   originalAmount!: number;
@@ -55,4 +60,8 @@ export class DebtEntity {
 
   @Col2({ type: 'uuid', name: 'sale_id' })
   saleId!: string;
+
+  // Mijoz bilan bog'liq (ixtiyoriy)
+  @Col2({ type: 'uuid', name: 'customer_id', nullable: true })
+  customerId?: string | null;
 }

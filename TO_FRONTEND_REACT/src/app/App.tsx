@@ -1,4 +1,3 @@
-// src/app/App.tsx
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ToastContainer } from '../shared/ui/Toast';
@@ -18,13 +17,20 @@ import { useAuthStore } from '../features/auth/model/auth.store';
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
+      // ✅ 5 daqiqa — page o'zgarishida VPS ga so'rov QAYTA YUKLANMAYDI
+      staleTime: 5 * 60 * 1000,
+      // ✅ 15 daqiqa — keshdan o'chmasin
+      gcTime: 15 * 60 * 1000,
       retry: 1,
       refetchOnWindowFocus: false,
+      refetchOnReconnect: true,
+    },
+    mutations: {
+      retry: 0,
     },
   },
 });
 
-// Login bo'lgandan keyin role ga qarab yo'naltirish
 function RoleBasedRedirect() {
   const { user } = useAuthStore();
   if (user?.role === 'SALER') return <Navigate to="/sales" replace />;
@@ -39,7 +45,7 @@ export default function App() {
           {/* Public */}
           <Route path="/login" element={<LoginPage />} />
 
-          {/* ADMIN only routes */}
+          {/* ADMIN only */}
           <Route element={<ProtectedRoute allowedRoles={['ADMIN']} />}>
             <Route element={<AppLayout />}>
               <Route path="/dashboard" element={<DashboardPage />} />
@@ -51,7 +57,7 @@ export default function App() {
             </Route>
           </Route>
 
-          {/* ADMIN + SALER routes */}
+          {/* ADMIN + SALER */}
           <Route element={<ProtectedRoute allowedRoles={['ADMIN', 'SALER']} />}>
             <Route element={<AppLayout />}>
               <Route path="/sales" element={<SalesPage />} />
@@ -59,12 +65,10 @@ export default function App() {
             </Route>
           </Route>
 
-          {/* Default redirect — role ga qarab */}
+          {/* Default redirect */}
           <Route path="/" element={<ProtectedRoute />}>
             <Route index element={<RoleBasedRedirect />} />
           </Route>
-
-          {/* Noto'g'ri URL — role ga qarab */}
           <Route path="*" element={<ProtectedRoute />}>
             <Route path="*" element={<RoleBasedRedirect />} />
           </Route>

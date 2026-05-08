@@ -9,12 +9,23 @@ import {
   JoinColumn,
   OneToMany,
   OneToOne,
+  Index,
 } from "typeorm";
 import { UserEntity } from "../../user/entities/user.entity";
 import { SaleItemEntity } from "./sale.item.entity";
 import { PaymentEntity } from "../../payments/entities/payment.entity";
 import { DebtEntity } from "../../debts/entities/debt.entity";
 import { ReturnEntity } from "../../return/entities/return.entity";
+import { CustomerEntity } from "../../customers/entities/customer.entity";
+
+export class ColumnNumericTransformer {
+  to(data: number): number {
+    return data;
+  }
+  from(data: string): number {
+    return data ? parseFloat(data) : 0;
+  }
+}
 
 export enum SaleStatus {
   DRAFT = "DRAFT",
@@ -24,36 +35,56 @@ export enum SaleStatus {
 }
 
 @Entity("sales")
+@Index(["saleNumber"], { unique: true })
+@Index(["status", "createdAt"])
+@Index(["customerId"])
 export class SaleEntity {
   @PrimaryGeneratedColumn("uuid")
   id!: string;
 
-  @Column({ type: "varchar", length: 30, unique: true })
-  saleNumber!: string; // e.g., SALE-2024-001234
+  @Column({ type: "varchar", length: 30 })
+  saleNumber!: string;
 
-  @Column({ type: "varchar", length: 20, default: SaleStatus.DRAFT })
+  @Column({ 
+    type: "enum", 
+    enum: SaleStatus, 
+    default: SaleStatus.DRAFT 
+  })
   status!: SaleStatus;
 
-  // Financial summary (denormalized for fast reporting)
-  @Column({ type: "numeric", precision: 14, scale: 2, default: 0 })
-  subtotal!: number; // Sum of custom_total across items
+  @Column({ 
+    type: "numeric", precision: 14, scale: 2, default: 0,
+    transformer: new ColumnNumericTransformer() 
+  })
+  subtotal!: number;
 
-  @Column({ type: "numeric", precision: 14, scale: 2, default: 0 })
-  totalDiscount!: number; // Sum of discount_amount across items
+  @Column({ 
+    type: "numeric", precision: 14, scale: 2, default: 0,
+    transformer: new ColumnNumericTransformer() 
+  })
+  totalDiscount!: number;
 
-  @Column({ type: "numeric", precision: 14, scale: 2, default: 0 })
-  grandTotal!: number; // subtotal - totalDiscount
+  @Column({ 
+    type: "numeric", precision: 14, scale: 2, default: 0,
+    transformer: new ColumnNumericTransformer() 
+  })
+  grandTotal!: number;
 
-  @Column({ type: "numeric", precision: 14, scale: 2, default: 0 })
-  grossProfit!: number; // Sum of (custom_unit_price - purchase_price) * quantity
+  @Column({ 
+    type: "numeric", precision: 14, scale: 2, default: 0,
+    transformer: new ColumnNumericTransformer() 
+  })
+  grossProfit!: number;
 
-  @Column({ type: "numeric", precision: 14, scale: 2, default: 0 })
-  netProfit!: number; // grossProfit - totalDiscount
+  @Column({ 
+    type: "numeric", precision: 14, scale: 2, default: 0,
+    transformer: new ColumnNumericTransformer() 
+  })
+  netProfit!: number;
 
   @Column({ type: "text", nullable: true })
   notes?: string | null;
 
-  // Timestamps
   @Column({
     type: "timestamp with time zone",
     nullable: true,
@@ -81,26 +112,29 @@ export class SaleEntity {
   deletedAt?: Date | null;
 
   @Column({ name: 'customer_id', type: 'uuid', nullable: true })
-  customerId?: string | null;
-
-  // Relations
-  @OneToMany(() => SaleEntity, (sale) => sale.createdById)
-  sales!: SaleEntity[];
+  customerId!: string | null;
 
   @Column({ name: "created_by", type: "uuid" })
   createdById!: string;
 
-  @ManyToOne(() => UserEntity, (user) => user.sales, { eager: true })
+  // --- RELATIONSHIPS ---
+
+  @ManyToOne(() => UserEntity, (user) => user.sales, { 
+    onDelete: 'RESTRICT',
+  })
   @JoinColumn({ name: "created_by" })
   createdBy!: UserEntity;
 
+  @ManyToOne(() => CustomerEntity, { nullable: true })
+  @JoinColumn({ name: "customer_id" })
+  customer?: CustomerEntity;
+
   @OneToMany(() => SaleItemEntity, (item) => item.sale, {
-    eager: true,
     cascade: true,
   })
   items!: SaleItemEntity[];
 
-  @OneToMany(() => PaymentEntity, (payment) => payment.sale, { eager: true })
+  @OneToMany(() => PaymentEntity, (payment) => payment.sale)
   payments!: PaymentEntity[];
 
   @OneToOne(() => DebtEntity, (debt) => debt.sale)

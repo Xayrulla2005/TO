@@ -1,8 +1,8 @@
 export type TimeRange = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
 export interface ChartPoint {
-  label: string;
-  value: number;
+  label:    string;
+  value:    number;
   refunds?: number;
 }
 
@@ -13,15 +13,28 @@ export interface PaymentSplit {
 }
 
 export interface StatisticsSummary {
+  // Tushum
   revenue:      number;
+  realRevenue:  number;   // ✅ qaytarishlar chiqarilgan
+
+  // Foyda
   profit:       number;
+  realProfit:   number;   // ✅ qaytarishlar chiqarilgan
+  grossProfit:  number;
+  margin:       number;   // ✅ foiz
+
+  // Buyurtmalar
   ordersCount:  number;
-  avgOrder?:    number;
-  realRevenue?:  number;
-  realProfit?:   number;
-  totalRefunds?: number;
-  refundCount?:  number;
+  avgOrder:     number;
+
+  // Qaytarishlar
+  totalRefunds: number;   // ✅
+  refundCount:  number;   // ✅
+
+  // Chart
   chartData:    ChartPoint[];
+
+  // To'lovlar
   paymentSplit: PaymentSplit;
 }
 
@@ -46,11 +59,13 @@ export interface DashboardStats {
     id:       string;
     name:     string;
     stockQty: number;
+    unit?:    string;
   }>;
   bestSellingProducts: Array<{
     id:    string;
     name:  string;
     qty:   number;
     total: number;
+    unit?: string;
   }>;
 }

@@ -1,192 +1,148 @@
-import { NestFactory } from "@nestjs/core";
-import { AppModule } from "./app.module";
-import { BadRequestException, ValidationPipe } from "@nestjs/common";
-import { SwaggerModule, DocumentBuilder } from "@nestjs/swagger";
-import { GlobalExceptionFilter } from "./common/filters/http.exception.filter";
-import { TraceIdInterceptor } from "./common/interceptors/trace.id.interceptor";
-import { SuccessResponseInterceptor } from "./common/interceptors/success.response.interceptor";
-import helmet from "helmet";
-import { ThrottlerGuard } from "@nestjs/throttler";
-import { APP_GUARD } from "@nestjs/core";
-import * as express from "express";
-import { config } from "dotenv";
-import * as path from "path";
-import { DataSource } from "typeorm";
+import { NestFactory } from '@nestjs/core';
+import { AppModule } from './app.module';
+import { BadRequestException, ValidationPipe } from '@nestjs/common';
+import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import { GlobalExceptionFilter } from './common/filters/http.exception.filter';
+import { TraceIdInterceptor } from './common/interceptors/trace.id.interceptor';
+import helmet from 'helmet';
+import * as express from 'express';
+import { config } from 'dotenv';
+import * as path from 'path';
+import cookieParser from 'cookie-parser';
 
 config();
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, {
     logger:
-      process.env.NODE_ENV === "production"
-        ? ["error", "warn"]
-        : ["log", "debug", "error", "warn", "verbose"],
+      process.env.NODE_ENV === 'production'
+        ? ['error', 'warn']
+        : ['log', 'debug', 'error', 'warn', 'verbose'],
   });
 
-  const port = parseInt(process.env.PORT || "3000", 10);
-  const corsOrigins = (process.env.CORS_ORIGIN || "http://localhost:5173")
-  .split(",")
-  .map((x) => x.trim());
+  const port = parseInt(process.env.PORT || '3000', 10);
 
-app.enableCors({
-  origin: corsOrigins,
-  credentials: true,
-});
+  // ── CORS: faqat 1 marta, to'liq konfiguratsiya ──────────────
+  const corsOrigins = (process.env.CORS_ORIGIN || 'http://localhost:5173')
+    .split(',')
+    .map((x) => x.trim());
 
-  // ── Security Headers (Helmet) ───────────────────────────
-  app.use(helmet());
-
-  // ── CORS ────────────────────────────────────────────────
   app.enableCors({
     origin: corsOrigins,
-    methods: (process.env.CORS_METHODS || "GET,POST,PUT,PATCH,DELETE").split(
-      ",",
-    ),
-    allowedHeaders: (
-      process.env.CORS_ALLOWED_HEADERS || "Content-Type,Authorization"
-    ).split(","),
-    credentials: true, // Required for httpOnly cookies
-    maxAge: 86400, // 24 hours
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-trace-id'],
+    credentials: true,
+    maxAge: 86400,
   });
 
-  // ── Cookie Parser ───────────────────────────────────────
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const cookieParser = require("cookie-parser");
+  // ── Security Headers ─────────────────────────────────────────
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: { policy: 'cross-origin' }, // upload rasmlar uchun
+    }),
+  );
+
+  // ── Cookie Parser ────────────────────────────────────────────
   app.use(cookieParser());
 
-  // ── Static File Serving for uploads ─────────────────────
-  const uploadDir = process.env.UPLOAD_DIR || "./uploads";
-  app.use("/uploads", express.static(path.resolve(uploadDir)));
+  // ── Static File Serving ──────────────────────────────────────
+  const uploadDir = process.env.UPLOAD_DIR || './uploads';
+  app.use('/uploads', express.static(path.resolve(uploadDir)));
 
-  // ── Global Validation Pipe ──────────────────────────────
+  // ── Global Validation Pipe ───────────────────────────────────
   app.useGlobalPipes(
-  new ValidationPipe({
-    whitelist: true,
-    forbidNonWhitelisted: true,
-    transform: true,
-    transformOptions: {
-      enableImplicitConversion: true,
-    },
-    // ERROR'larni batafsil ko'rsatish
-    exceptionFactory: (errors) => {
-      console.error('Validation errors:', JSON.stringify(errors, null, 2));
-      return new BadRequestException(errors);
-    },
-  }),
-);
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+      transformOptions: { enableImplicitConversion: true },
+      exceptionFactory: (errors) => {
+        const messages = errors.map((e) =>
+          Object.values(e.constraints || {}).join(', '),
+        );
+        return new BadRequestException(messages);
+      },
+    }),
+  );
 
-  // ── Global Exception Filter ─────────────────────────────
+  // ── Global Exception Filter ──────────────────────────────────
   app.useGlobalFilters(new GlobalExceptionFilter());
 
-  // ── Global Interceptors ─────────────────────────────────
+  // ── Global Interceptors ──────────────────────────────────────
   app.useGlobalInterceptors(new TraceIdInterceptor());
-  // Note: SuccessResponseInterceptor wraps responses - enable if desired
-  // app.useGlobalInterceptors(new SuccessResponseInterceptor());
 
-  // ── Swagger / OpenAPI ───────────────────────────────────
-if (process.env.NODE_ENV !== "production") {
-  const apiVersion = process.env.API_VERSION || "v1";
+  // ── Swagger (faqat development) ──────────────────────────────
+  if (process.env.NODE_ENV !== 'production') {
+    const apiVersion = process.env.API_VERSION || 'v1';
+    const swaggerConfig = new DocumentBuilder()
+      .setTitle('ERP System API')
+      .setDescription('Enterprise Resource Planning System API')
+      .setVersion(apiVersion)
+      .addBearerAuth(
+        { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+        'access-token',
+      )
+      .addCookieAuth('refresh_token')
+      .build();
 
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle("ERP System API")
-    .setDescription("Enterprise Resource Planning System API")
-    .setVersion(apiVersion)
-    .addBearerAuth(
-      { type: "http", scheme: "bearer", bearerFormat: "JWT" },
-      "access-token",
-    )
-    .addCookieAuth("refresh_token")
-    .build();
+    const document = SwaggerModule.createDocument(app, swaggerConfig);
+    SwaggerModule.setup(`api/${apiVersion}/docs`, app, document);
+    app
+      .getHttpAdapter()
+      .get(`/api/${apiVersion}/openapi.json`, (_req, res) => res.json(document));
+  }
 
-  const document = SwaggerModule.createDocument(app, swaggerConfig);
-
-  SwaggerModule.setup(`api/${apiVersion}/docs`, app, document);
-
-  // Optional: raw OpenAPI JSON
-  app
-    .getHttpAdapter()
-    .get(`/api/${apiVersion}/openapi.json`, (_req, res) => {
-      res.json(document);
-    });
-}
-
-
-  // ── Health Check with DB and Redis connectivity ─────────
-  app.getHttpAdapter().get("/health", async (_req, res) => {
-    const health: any = {
-      status: "ok",
+  // ── Health Check ─────────────────────────────────────────────
+  app.getHttpAdapter().get('/health', async (_req, res) => {
+    const health: Record<string, any> = {
+      status: 'ok',
       timestamp: new Date().toISOString(),
-      uptime: process.uptime(),
+      uptime: Math.round(process.uptime()),
       memory: {
-        used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
-        total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024),
+        usedMB: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+        totalMB: Math.round(process.memoryUsage().heapTotal / 1024 / 1024),
       },
       services: {},
     };
 
     try {
-      // Check database
-      const dataSource = app.get("DataSource");
-      await dataSource.query("SELECT 1");
-      health.services.database = "ok";
-    } catch (e) {
-      health.services.database = "error";
-      health.status = "degraded";
+      const dataSource = app.get('DataSource');
+      await dataSource.query('SELECT 1');
+      health.services.database = 'ok';
+    } catch {
+      health.services.database = 'error';
+      health.status = 'degraded';
     }
 
     try {
-      // Check Redis
-      const redisService = app.get("RedisService");
-      await redisService.get("health-check");
-      health.services.redis = "ok";
-    } catch (e) {
-      health.services.redis = "error";
-      health.status = "degraded";
+      const redisService = app.get('RedisService', { strict: false });
+      if (redisService) {
+        await redisService.get('health-check');
+        health.services.redis = 'ok';
+      }
+    } catch {
+      health.services.redis = 'error';
     }
 
-    const statusCode = health.status === "ok" ? 200 : 503;
-    res.status(statusCode).json(health);
+    res.status(health.status === 'ok' ? 200 : 503).json(health);
   });
 
-  // ── Metrics (basic) ─────────────────────────────────────
-  let requestCount = 0;
-  app.use((_req, _res, next) => {
-    requestCount++;
-    next();
-  });
-
-  app.getHttpAdapter().get("/metrics", (_req, res) => {
-    res.json({
-      requests_total: requestCount,
-      uptime_seconds: process.uptime(),
-      nodejs_version: process.version,
-      process_pid: process.pid,
-      memory_heap_used_bytes: process.memoryUsage().heapUsed,
-      memory_heap_total_bytes: process.memoryUsage().heapTotal,
-      memory_rss_bytes: process.memoryUsage().rss,
-    });
-  });
-
-  // ── Graceful Shutdown ───────────────────────────────────
-  process.on("SIGTERM", async () => {
-    console.log("SIGTERM received. Shutting down gracefully...");
+  // ── Graceful Shutdown ────────────────────────────────────────
+  const shutdown = async (signal: string) => {
+    console.log(`${signal} received. Shutting down gracefully...`);
     await app.close();
     process.exit(0);
-  });
+  };
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
 
-  process.on("SIGINT", async () => {
-    console.log("SIGINT received. Shutting down gracefully...");
-    await app.close();
-    process.exit(0);
-  });
-
-  // ── Start Server ────────────────────────────────────────
+  // ── Start ────────────────────────────────────────────────────
   await app.listen(port);
-  console.log(`ERP Server running on port ${port}`);
-  console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
+  console.log(`✅ ERP Server running on port ${port}`);
+  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
 
-  if (process.env.NODE_ENV !== "production") {
-    console.log(`Swagger docs: http://localhost:${port}/api/v1/docs`);
+  if (process.env.NODE_ENV !== 'production') {
+    console.log(`📖 Swagger: http://localhost:${port}/api/v1/docs`);
   }
 }
 

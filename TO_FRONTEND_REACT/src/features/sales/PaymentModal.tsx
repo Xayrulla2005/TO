@@ -1,12 +1,32 @@
-// Nasiya input olib tashlandi — avtomatik hisoblanadi (qolgan summa)
-import { useState, useEffect } from 'react';
-import { toast } from '@/shared/ui/Toast';
-import { customersApi, Customer } from '@/features/customer/api/customers.api';
-import {
-  X, Banknote, CreditCard, AlertCircle, CheckCircle2,
-  Search, UserPlus, User, Phone, Check, Clock,
-} from 'lucide-react';
+// src/features/sales/PaymentModal.tsx — TO'LIQ TUZATILGAN
+// Tuzatishlar:
+// 1. Qidiruv filter — faqat mos keladiganlar ko'rsatiladi
+//    "b" yozganda hamma chiqmasin — phoneMatch bo'sh string tekshiruvi qo'shildi
+// 2. debtorPhone backend ga uzatiladi
+// 3. Mijoz tanlanganda qidiruv tozalanadi
+// 4. "Barchasi naqd / karta" tez tugmalari
+// 5. Mavjud qarz ko'rsatiladi
 
+import { useState, useEffect, useMemo, useCallback } from "react";
+import { api } from "@/shared/lib/axios";
+import { toast } from "@/shared/ui/Toast";
+import { Customer } from "@/features/customer/api/customers.api";
+import {
+  X,
+  Banknote,
+  CreditCard,
+  AlertCircle,
+  CheckCircle2,
+  Search,
+  UserPlus,
+  User,
+  Check,
+  Loader2,
+} from "lucide-react";
+
+// ─────────────────────────────────────────────────────────────
+// TYPES
+// ─────────────────────────────────────────────────────────────
 interface PaymentModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -24,40 +44,44 @@ export interface PaymentData {
   customerPhone?: string;
 }
 
-function fmtInput(val: string): string {
-  const dotIdx = val.indexOf('.');
-  if (dotIdx !== -1) {
-    const intPart = val.slice(0, dotIdx).replace(/\D/g, '');
-    const decPart = val.slice(dotIdx + 1).replace(/\D/g, '');
-    return intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ' ') + '.' + decPart;
-  }
-  return val.replace(/\D/g, '').replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
-}
+// ─────────────────────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────────────────────
+const fmtInput = (val: string): string => {
+  const clean = val.replace(/[^\d.]/g, "");
+  const parts = clean.split(".");
+  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+  return parts.length > 2 ? parts[0] + "." + parts[1] : parts.join(".");
+};
 
-function parseInput(val: string): number {
-  const n = parseFloat(val.replace(/\s/g, ''));
+const parseInput = (val: string): number => {
+  const n = parseFloat(val.replace(/\s/g, ""));
   return isNaN(n) ? 0 : n;
-}
+};
 
-function fmtCurrency(n: number): string {
-  const safe = isNaN(n) ? 0 : n;
-  const v = parseFloat(safe.toFixed(4));
-  return '$' + new Intl.NumberFormat('uz-UZ', { minimumFractionDigits: 0, maximumFractionDigits: 4 }).format(v);
-}
+const fmtCurrency = (n: number): string =>
+  "$" +
+  new Intl.NumberFormat("uz-UZ", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(n || 0);
 
-function formatPhone(raw: string): string {
-  let digits = raw.replace(/\D/g, '');
-  if (!digits.startsWith('998')) digits = '998' + digits;
-  if (digits.length > 12) digits = digits.slice(0, 12);
+const formatPhone = (raw: string): string => {
+  let digits = raw.replace(/\D/g, "");
+  if (!digits.startsWith("998")) digits = "998" + digits;
+  digits = digits.slice(0, 12);
   const d = digits.slice(3);
-  let f = '+998';
-  if (d.length > 0) f += ' ' + d.slice(0, 2);
-  if (d.length > 2) f += ' ' + d.slice(2, 5);
-  if (d.length > 5) f += ' ' + d.slice(5, 7);
-  if (d.length > 7) f += ' ' + d.slice(7, 9);
+  let f = "+998";
+  if (d.length > 0) f += " " + d.slice(0, 2);
+  if (d.length > 2) f += " " + d.slice(2, 5);
+  if (d.length > 5) f += " " + d.slice(5, 7);
+  if (d.length > 7) f += " " + d.slice(7, 9);
   return f;
-}
+};
 
+// ─────────────────────────────────────────────────────────────
+// PAYMENT MODAL
+// ─────────────────────────────────────────────────────────────
 export function PaymentModal({
   isOpen,
   onClose,
@@ -65,80 +89,103 @@ export function PaymentModal({
   onConfirm,
   isSubmitting,
 }: PaymentModalProps) {
-  const [cashAmount, setCashAmount] = useState('');
-  const [cardAmount, setCardAmount] = useState('');
-
+  const [cashAmount, setCashAmount] = useState("");
+  const [cardAmount, setCardAmount] = useState("");
   const [allCustomers, setAllCustomers] = useState<Customer[]>([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [loadingCustomers, setLoadingCustomers] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(
+    null,
+  );
   const [showNewForm, setShowNewForm] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [newPhone, setNewPhone] = useState('');
+  const [newName, setNewName] = useState("");
+  const [newPhone, setNewPhone] = useState("");
 
-  const cash = parseInput(cashAmount);
-  const card = parseInput(cardAmount);
+  const cash = useMemo(() => parseInput(cashAmount), [cashAmount]);
+  const card = useMemo(() => parseInput(cardAmount), [cardAmount]);
 
-  // Nasiya = jami - (naqd + karta), never negative — kept for submission logic
-  const rawDebt = parseFloat((totalAmount - cash - card).toFixed(10));
-  const debtAmount = Math.max(0, isNaN(rawDebt) ? 0 : rawDebt);
-  const hasDebt = debtAmount >= 0.01;
+  const debtAmount = useMemo(() => {
+    const res = totalAmount - cash - card;
+    return res > 0.009 ? parseFloat(res.toFixed(2)) : 0;
+  }, [totalAmount, cash, card]);
 
-  // Overpaid: cash+card exceeds total by more than rounding tolerance
-  const isOverpaid = (cash + card) > totalAmount + 0.005;
+  const isOverpaid = cash + card > totalAmount + 0.01;
+  const hasDebt = debtAmount > 0;
 
-  const handleCashChange = (raw: string) => {
-    setCashAmount(fmtInput(raw.replace(/[^\d.\s]/g, '').replace(/\s/g, '')));
-  };
-
-  const handleCardChange = (raw: string) => {
-    setCardAmount(fmtInput(raw.replace(/[^\d.\s]/g, '').replace(/\s/g, '')));
-  };
-
-  const filtered = (() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return [];
-    return allCustomers.filter((c) => {
-      const nameMatch = c.name.toLowerCase().includes(q);
-      const phoneDigits = c.phone.replace(/\D/g, '');
-      const queryDigits = q.replace(/\D/g, '');
-      const phoneMatch = queryDigits.length > 0 && phoneDigits.includes(queryDigits);
-      return nameMatch || phoneMatch;
-    });
-  })();
-
+  // ── Mijozlarni yuklash ────────────────────────────────────
   useEffect(() => {
     if (!isOpen) return;
-    customersApi
-      .getAll()
-      .then((list) => setAllCustomers(list))
-      .catch(() => {});
+    setLoadingCustomers(true);
+    api
+      .get("/customers", { params: { limit: 9999, page: 1 } })
+      .then((res) => {
+        const raw = res.data;
+        const list: Customer[] = Array.isArray(raw?.data)
+          ? raw.data
+          : Array.isArray(raw)
+            ? raw
+            : [];
+        setAllCustomers(list);
+      })
+      .catch(() => {
+        setAllCustomers([]);
+        toast.error("Mijozlarni yuklashda xato");
+      })
+      .finally(() => setLoadingCustomers(false));
   }, [isOpen]);
 
+  // ── Modal yopilganda reset ────────────────────────────────
   useEffect(() => {
-    if (isOpen) {
-      setCashAmount('');
-      setCardAmount('');
-      setSearchQuery('');
+    if (!isOpen) {
+      setCashAmount("");
+      setCardAmount("");
+      setSearchQuery("");
       setSelectedCustomer(null);
       setShowNewForm(false);
-      setNewName('');
-      setNewPhone('');
+      setNewName("");
+      setNewPhone("");
     }
-  }, [isOpen, totalAmount]);
+  }, [isOpen]);
 
-  // Unified customer validity check (used in both disabled prop and handleConfirm)
+  // ── Mijoz qidirish — TO'G'RILANGAN FILTER ────────────────
+  const filteredCustomers = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+
+    // Bo'sh yoki juda qisqa qidiruv — hech narsa ko'rsatmaymiz
+    if (!q || q.length < 1) return [];
+    if (!Array.isArray(allCustomers) || allCustomers.length === 0) return [];
+
+    // Telefon raqami qidiruvini faqat raqam kiritilganda ishlatamiz
+    const qDigits = q.replace(/\D/g, "");
+    const isDigitSearch = qDigits.length >= 3;
+
+    return allCustomers
+      .filter((c) => {
+        // ✅ Ism bo'yicha: faqat harf kiritilganda
+        const nameMatch = c.name?.toLowerCase().includes(q);
+
+        // ✅ Telefon bo'yicha: FAQAT kamida 3 ta raqam kiritilganda
+        const phoneMatch =
+          isDigitSearch && c.phone?.replace(/\D/g, "").includes(qDigits);
+
+        return nameMatch || (phoneMatch ?? false);
+      })
+      .slice(0, 10);
+  }, [searchQuery, allCustomers]);
+
+  // ── Tasdiqlash ────────────────────────────────────────────
   const customerInfoValid =
     !hasDebt ||
     !!selectedCustomer ||
-    (showNewForm && newName.trim().length > 0 && newPhone.trim().length > 0);
+    (showNewForm && newName.trim() && newPhone.length >= 12);
 
-  const handleConfirm = () => {
+  const handleConfirm = useCallback(() => {
     if (isOverpaid) {
-      toast.error("To'lov summasi jami summadan oshib ketdi!");
+      toast.error("To'lov summasi ko'p!");
       return;
     }
     if (!customerInfoValid) {
-      toast.error("Qarzga savdo uchun mijoz ma'lumotlari shart!");
+      toast.error("Nasiya uchun mijoz kerak!");
       return;
     }
 
@@ -146,325 +193,408 @@ export function PaymentModal({
       cashAmount: cash,
       cardAmount: card,
       debtAmount,
-      customerId: selectedCustomer?.id || undefined,
-      customerName: selectedCustomer?.name || (showNewForm ? newName.trim() : undefined),
-      customerPhone: selectedCustomer?.phone || (showNewForm ? newPhone.trim() : undefined),
+      customerId:
+        selectedCustomer?.id === "temp" ? undefined : selectedCustomer?.id,
+      customerName:
+        selectedCustomer?.name || (showNewForm ? newName.trim() : undefined),
+      customerPhone:
+        selectedCustomer?.phone || (showNewForm ? newPhone.trim() : undefined),
     });
-  };
+  }, [
+    cash,
+    card,
+    debtAmount,
+    selectedCustomer,
+    showNewForm,
+    newName,
+    newPhone,
+    isOverpaid,
+    customerInfoValid,
+    onConfirm,
+  ]);
+
+  // ── Tez tugmalar ──────────────────────────────────────────
+  const handleAllCash = useCallback(() => {
+    setCashAmount(String(totalAmount));
+    setCardAmount("");
+  }, [totalAmount]);
+
+  const handleAllCard = useCallback(() => {
+    setCardAmount(String(totalAmount));
+    setCashAmount("");
+  }, [totalAmount]);
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/50 backdrop-blur-sm">
-      <div className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-2xl max-h-[90vh] flex flex-col">
-
-        {/* Header */}
-        <div className="sticky top-0 bg-white z-10 flex items-center justify-between px-5 py-4 border-b border-gray-100">
-          <h2 className="text-lg font-bold text-gray-900">To'lovni rasmiylashtirish</h2>
-          <button onClick={onClose} className="p-2 rounded-xl hover:bg-gray-100 transition-colors">
-            <X size={20} className="text-gray-500" />
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/60 backdrop-blur-sm">
+      <div className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-2xl max-h-[95vh] flex flex-col overflow-hidden">
+        {/* ── Header ── */}
+        <div className="flex items-center justify-between px-5 py-4 border-b">
+          <h2 className="text-lg font-bold text-gray-800">
+            To&apos;lovni rasmiylashtirish
+          </h2>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+          >
+            <X size={20} />
           </button>
         </div>
 
-        <div className="p-5 space-y-4 overflow-y-auto flex-1">
-
-          {/* Total */}
-          <div className="bg-gradient-to-r from-indigo-500 to-purple-600 rounded-2xl p-4 text-white">
-            <div className="text-sm text-indigo-100 mb-0.5">Jami to'lov summasi</div>
-            <div className="text-3xl font-bold tracking-tight">{fmtCurrency(totalAmount)}</div>
+        <div className="p-5 space-y-4 overflow-y-auto">
+          {/* ── Jami summa ── */}
+          <div className="bg-gradient-to-br from-indigo-600 to-purple-700 rounded-xl p-5 text-white shadow-lg">
+            <p className="text-indigo-100 text-xs uppercase tracking-wider font-medium">
+              Jami to&apos;lov
+            </p>
+            <p className="text-3xl font-black">{fmtCurrency(totalAmount)}</p>
           </div>
 
-          {/* Payment inputs */}
-          <div className="space-y-3">
+          {/* ── Tez tugmalar ── */}
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={handleAllCash}
+              className="py-2.5 bg-emerald-50 border border-emerald-200 text-emerald-700
+                         rounded-xl font-semibold text-xs hover:bg-emerald-100 transition-colors
+                         flex items-center justify-center gap-1.5"
+            >
+              <Banknote size={14} /> Barchasi naqd
+            </button>
+            <button
+              onClick={handleAllCard}
+              className="py-2.5 bg-blue-50 border border-blue-200 text-blue-700
+                         rounded-xl font-semibold text-xs hover:bg-blue-100 transition-colors
+                         flex items-center justify-center gap-1.5"
+            >
+              <CreditCard size={14} /> Barchasi karta
+            </button>
+          </div>
 
+          {/* ── To'lov maydonlari ── */}
+          <div className="space-y-3">
             {/* Naqd */}
-            <div>
-              <label className="flex items-center gap-1.5 text-sm font-semibold text-gray-700 mb-1.5">
-                <Banknote size={16} className="text-emerald-500" /> Naqd pul
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-gray-500 flex items-center gap-2">
+                <Banknote size={14} className="text-emerald-500" /> NAQD PUL
               </label>
-              <div className="relative">
-                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-semibold">$</span>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={cashAmount}
-                  onChange={(e) => handleCashChange(e.target.value)}
-                  placeholder="0"
-                  className="w-full pl-8 pr-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-emerald-400 text-lg font-semibold transition-colors"
-                />
-              </div>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={cashAmount}
+                onChange={(e) => setCashAmount(fmtInput(e.target.value))}
+                className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-100 rounded-xl
+                           focus:border-emerald-500 focus:bg-white outline-none transition-all
+                           text-lg font-semibold"
+                placeholder="0"
+              />
             </div>
 
             {/* Karta */}
-            <div>
-              <label className="flex items-center gap-1.5 text-sm font-semibold text-gray-700 mb-1.5">
-                <CreditCard size={16} className="text-blue-500" /> Karta
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-gray-500 flex items-center gap-2">
+                <CreditCard size={14} className="text-blue-500" /> KARTA
               </label>
-              <div className="relative">
-                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-semibold">$</span>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={cardAmount}
-                  onChange={(e) => handleCardChange(e.target.value)}
-                  placeholder="0"
-                  className="w-full pl-8 pr-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-blue-400 text-lg font-semibold transition-colors"
-                />
-              </div>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={cardAmount}
+                onChange={(e) => setCardAmount(fmtInput(e.target.value))}
+                className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-100 rounded-xl
+                           focus:border-blue-500 focus:bg-white outline-none transition-all
+                           text-lg font-semibold"
+                placeholder="0"
+              />
             </div>
           </div>
 
-          {/* Summary */}
+          {/* ── To'lov holati ── */}
           <div
-            className={`rounded-xl p-4 space-y-2 text-sm border-2 ${
+            className={`p-4 rounded-xl border-2 transition-all ${
               isOverpaid
-                ? 'bg-red-50 border-red-200'
+                ? "bg-red-50 border-red-200"
                 : hasDebt
-                ? 'bg-amber-50 border-amber-200'
-                : 'bg-emerald-50 border-emerald-200'
+                  ? "bg-amber-50 border-amber-200"
+                  : "bg-emerald-50 border-emerald-200"
             }`}
           >
-            {/* Cash row */}
-            {cash > 0 && (
-              <div className="flex justify-between">
-                <span className="text-gray-600 flex items-center gap-1">
-                  <Banknote size={12} className="text-emerald-500" />Naqd:
-                </span>
-                <span className="font-semibold">{fmtCurrency(cash)}</span>
-              </div>
-            )}
-
-            {/* Card row */}
-            {card > 0 && (
-              <div className="flex justify-between">
-                <span className="text-gray-600 flex items-center gap-1">
-                  <CreditCard size={12} className="text-blue-500" />Karta:
-                </span>
-                <span className="font-semibold">{fmtCurrency(card)}</span>
-              </div>
-            )}
-
-            {/* Remaining debt row — current sale only */}
-            {hasDebt && !isOverpaid && (
-              <div className="flex justify-between">
-                <span className="text-amber-700 flex items-center gap-1">
-                  <Clock size={12} className="text-amber-500" />Qoldiq (nasiya):
-                </span>
-                <span className="font-semibold text-amber-700">{fmtCurrency(debtAmount)}</span>
-              </div>
-            )}
-
-            {/* Status row */}
-            <div className="border-t border-gray-200 pt-2 flex justify-between font-bold">
-              {isOverpaid ? (
-                <>
-                  <span className="text-red-600 flex items-center gap-1">
-                    <AlertCircle size={14} />Ortiqcha:
-                  </span>
-                  <span className="text-red-600">{fmtCurrency(cash + card - totalAmount)}</span>
-                </>
-              ) : (
-                <>
-                  <span className={`flex items-center gap-1 ${hasDebt ? 'text-amber-700' : 'text-emerald-700'}`}>
-                    <CheckCircle2 size={14} />To'lov qabul qilindi
-                  </span>
-                  <span className={hasDebt ? 'text-amber-700' : 'text-emerald-700'}>✓</span>
-                </>
-              )}
+            <div className="flex justify-between items-center">
+              <span
+                className={`text-sm font-bold flex items-center gap-2 ${
+                  isOverpaid
+                    ? "text-red-700"
+                    : hasDebt
+                      ? "text-amber-700"
+                      : "text-emerald-700"
+                }`}
+              >
+                {isOverpaid ? (
+                  <AlertCircle size={16} />
+                ) : (
+                  <CheckCircle2 size={16} />
+                )}
+                {isOverpaid
+                  ? "Ortiqcha to'lov"
+                  : hasDebt
+                    ? "Nasiya (Qarz)"
+                    : "To'liq to'landi ✓"}
+              </span>
+              <span
+                className={`font-black text-xl ${
+                  isOverpaid
+                    ? "text-red-700"
+                    : hasDebt
+                      ? "text-amber-700"
+                      : "text-emerald-700"
+                }`}
+              >
+                {isOverpaid
+                  ? fmtCurrency(cash + card - totalAmount)
+                  : hasDebt
+                    ? fmtCurrency(debtAmount)
+                    : fmtCurrency(0)}
+              </span>
             </div>
+            {hasDebt && (
+              <p className="text-xs text-amber-600 mt-1.5">
+                Naqd: {fmtCurrency(cash)} + Karta: {fmtCurrency(card)} ={" "}
+                {fmtCurrency(cash + card)}
+                &nbsp;·&nbsp;Qarz:{" "}
+                <span className="font-bold">{fmtCurrency(debtAmount)}</span>
+              </p>
+            )}
           </div>
 
-          {/* Mijoz tanlash */}
-          <div className="border-2 border-gray-100 rounded-xl overflow-hidden">
-            <div className="px-4 py-3 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
-              <span className="text-sm font-semibold text-gray-700 flex items-center gap-1.5">
-                <User size={15} className="text-indigo-500" />
-                Mijoz
-                {hasDebt ? (
-                  <span className="text-xs text-red-400 font-normal ml-1">* majburiy</span>
-                ) : (
-                  <span className="text-xs text-gray-400 font-normal ml-1">(ixtiyoriy)</span>
-                )}
-              </span>
-              {selectedCustomer && (
-                <button
-                  onClick={() => {
-                    setSelectedCustomer(null);
-                    setSearchQuery('');
-                  }}
-                  className="text-xs text-gray-400 hover:text-red-500 transition-colors"
-                >
-                  O'zgartirish
-                </button>
+          {/* ── Mijoz tanlash ── */}
+          <div className="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+            <div className="bg-gray-50 px-4 py-2 border-b text-[10px] font-black text-gray-400 uppercase flex justify-between items-center">
+              <span>Mijoz ma&apos;lumotlari</span>
+              {hasDebt ? (
+                <span className="text-red-500">* Nasiya uchun shart</span>
+              ) : (
+                <span className="text-gray-400">Ixtiyoriy</span>
               )}
             </div>
 
-            <div className="p-3 space-y-2">
+            <div className="p-3">
               {selectedCustomer ? (
-                <div className="flex items-center gap-3 bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3">
-                  <div className="w-9 h-9 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0">
-                    <User size={16} className="text-indigo-600" />
+                /* Tanlangan mijoz */
+                <div className="flex items-center justify-between bg-indigo-50 p-3 rounded-xl border border-indigo-100">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-indigo-600 rounded-full flex items-center justify-center text-white flex-shrink-0">
+                      <User size={18} />
+                    </div>
+                    <div>
+                      <p className="font-bold text-gray-800 text-sm">
+                        {selectedCustomer.name}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {selectedCustomer.phone}
+                      </p>
+                      {Number((selectedCustomer as any).totalDebt) > 0 && (
+                        <p className="text-xs text-red-500 font-semibold mt-0.5">
+                          Mavjud qarz:{" "}
+                          {fmtCurrency(
+                            Number((selectedCustomer as any).totalDebt),
+                          )}
+                        </p>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-gray-900 text-sm truncate">{selectedCustomer.name}</p>
-                    <p className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
-                      <Phone size={10} />{selectedCustomer.phone}
-                    </p>
-                  </div>
-                  <Check size={18} className="text-indigo-500 flex-shrink-0" />
+                  <button
+                    onClick={() => {
+                      setSelectedCustomer(null);
+                      setSearchQuery("");
+                    }}
+                    className="p-1.5 text-indigo-400 hover:text-indigo-700 hover:bg-indigo-100 rounded-lg transition-colors"
+                  >
+                    <X size={16} />
+                  </button>
                 </div>
               ) : (
-                <>
+                /* Qidiruv */
+                <div className="space-y-2">
                   <div className="relative">
-                    <Search
-                      size={15}
-                      className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
-                    />
+                    {loadingCustomers ? (
+                      <Loader2
+                        className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 animate-spin"
+                        size={16}
+                      />
+                    ) : (
+                      <Search
+                        className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+                        size={16}
+                      />
+                    )}
                     <input
+                      autoComplete="off"
                       type="text"
+                      placeholder={
+                        loadingCustomers
+                          ? "Yuklanmoqda..."
+                          : "Ism yoki telefon (kamida 3 raqam)..."
+                      }
                       value={searchQuery}
                       onChange={(e) => {
                         setSearchQuery(e.target.value);
                         setShowNewForm(false);
                       }}
-                      placeholder="Ism yoki telefon bo'yicha..."
-                      autoComplete="off"
-                      className="w-full pl-9 pr-4 py-2.5 border-2 border-gray-200 rounded-xl text-sm focus:outline-none focus:border-indigo-400 transition-colors"
+                      disabled={loadingCustomers}
+                      className="w-full pl-9 pr-4 py-2.5 border border-gray-200 rounded-xl
+                                 outline-none focus:border-indigo-400 transition-all text-sm
+                                 disabled:opacity-60 bg-white"
                     />
                   </div>
 
-                  {searchQuery.trim().length > 0 && filtered.length > 0 && (
-                    <div className="max-h-48 overflow-y-auto rounded-xl border border-gray-100 divide-y divide-gray-50">
-                      {filtered.map((c) => (
+                  {/* ✅ Qidiruv natijalari — faqat mos kelganlar */}
+                  {filteredCustomers.length > 0 && (
+                    <div
+                      className="border border-gray-100 rounded-xl divide-y divide-gray-50
+                                    max-h-44 overflow-y-auto bg-white shadow-sm"
+                    >
+                      {filteredCustomers.map((c) => (
                         <button
                           key={c.id}
                           onClick={() => {
                             setSelectedCustomer(c);
+                            setSearchQuery("");
                             setShowNewForm(false);
-                            setSearchQuery('');
                           }}
-                          className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-indigo-50 transition-colors text-left"
+                          className="w-full px-3 py-2.5 hover:bg-indigo-50 flex items-center
+                                     justify-between text-left transition-colors"
                         >
-                          <div className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
-                            <User size={13} className="text-gray-500" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-gray-800">{c.name}</p>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-semibold text-gray-800 truncate">
+                              {c.name}
+                            </p>
                             <p className="text-xs text-gray-400">{c.phone}</p>
+                            {Number((c as any).totalDebt) > 0 && (
+                              <p className="text-xs text-red-400 font-medium">
+                                Qarz:{" "}
+                                {fmtCurrency(Number((c as any).totalDebt))}
+                              </p>
+                            )}
                           </div>
+                          <Check
+                            size={14}
+                            className="text-indigo-400 flex-shrink-0 ml-2"
+                          />
                         </button>
                       ))}
                     </div>
                   )}
 
-                  {searchQuery.trim().length > 0 && filtered.length === 0 && !showNewForm && (
-                    <div className="flex items-center justify-between px-1 py-1">
-                      <span className="text-xs text-gray-400">Mijoz topilmadi</span>
+                  {/* Topilmadi — yangi qo'shish */}
+                  {searchQuery.trim().length >= 2 &&
+                    filteredCustomers.length === 0 &&
+                    !showNewForm && (
                       <button
                         onClick={() => {
                           setShowNewForm(true);
-                          setNewName(searchQuery);
-                          setNewPhone('+998 ');
+                          setNewName(searchQuery.trim());
+                          setNewPhone("");
                         }}
-                        className="flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors"
+                        className="w-full p-3 border-2 border-dashed border-indigo-200 rounded-xl
+                                 text-indigo-600 flex items-center justify-center gap-2
+                                 font-semibold text-sm hover:bg-indigo-50 transition-all"
                       >
-                        <UserPlus size={13} /> Yangi mijoz
+                        <UserPlus size={15} />
+                        &ldquo;{searchQuery.trim()}&rdquo; — yangi mijoz
+                        qo&apos;shish
                       </button>
-                    </div>
-                  )}
+                    )}
 
+                  {/* Yangi mijoz formasi */}
                   {showNewForm && (
-                    <div className="bg-gray-50 rounded-xl p-3 space-y-2 border border-gray-200">
-                      <p className="text-xs font-semibold text-gray-600 flex items-center gap-1">
-                        <UserPlus size={12} /> Yangi mijoz
-                      </p>
+                    <div className="p-3 bg-gray-50 rounded-xl border border-gray-200 space-y-2.5">
+                      <div className="flex items-center gap-2 text-indigo-600 font-bold text-xs uppercase">
+                        <UserPlus size={13} /> Yangi mijoz
+                      </div>
                       <input
-                        type="text"
+                        autoComplete="off"
+                        className="w-full p-2.5 border border-gray-200 rounded-xl text-sm
+                                   outline-none focus:border-indigo-400 bg-white"
+                        placeholder="Mijoz ismi *"
                         value={newName}
-                        onChange={(e) =>
-                          setNewName(
-                            e.target.value.charAt(0).toUpperCase() + e.target.value.slice(1),
-                          )
-                        }
-                        placeholder="To'liq ism *"
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-indigo-400"
+                        onChange={(e) => setNewName(e.target.value)}
                       />
                       <input
-                        type="tel"
+                        autoComplete="off"
+                        className="w-full p-2.5 border border-gray-200 rounded-xl text-sm
+             outline-none focus:border-indigo-400 bg-white"
+                        placeholder="+998 90 000 00 00 *"
                         value={newPhone}
-                        onChange={(e) => {
-                          const raw = e.target.value;
-                          if (raw === '' || raw === '+') {
-                            setNewPhone('+998 ');
-                            return;
-                          }
-                          setNewPhone(formatPhone(raw));
-                        }}
+                        onChange={(e) =>
+                          setNewPhone(formatPhone(e.target.value))
+                        }
                         onFocus={() => {
-                          if (!newPhone) setNewPhone('+998 ');
+                          if (!newPhone) setNewPhone("+998 ");
                         }}
-                        placeholder="+998 90 123 45 67"
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-indigo-400"
                       />
                       <div className="flex gap-2">
                         <button
                           onClick={() => {
                             setShowNewForm(false);
-                            setSearchQuery('');
+                            setNewName("");
+                            setNewPhone("");
                           }}
-                          className="flex-1 py-1.5 text-xs border border-gray-200 rounded-lg text-gray-500 hover:bg-gray-100 transition-colors"
+                          className="flex-1 py-2 text-xs font-semibold text-gray-500 hover:text-gray-700"
                         >
                           Bekor
                         </button>
                         <button
+                          disabled={!newName.trim() || newPhone.length < 12}
                           onClick={() => {
-                            if (!newName.trim() || !newPhone.trim()) {
-                              toast.error('Ism va telefon shart!');
-                              return;
-                            }
                             setSelectedCustomer({
-                              id: '',
+                              id: "temp",
                               name: newName.trim(),
-                              phone: newPhone.trim(),
-                              totalDebt: 0,
-                              createdAt: '',
-                              updatedAt: '',
-                            });
+                              phone: newPhone,
+                            } as any);
                             setShowNewForm(false);
+                            setSearchQuery("");
                           }}
-                          className="flex-1 py-1.5 text-xs bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-semibold transition-colors"
+                          className="flex-[2] py-2 bg-indigo-600 text-white rounded-xl
+                                     font-semibold text-xs hover:bg-indigo-700
+                                     disabled:opacity-50 transition-colors"
                         >
-                          Qo'shish
+                          Saqlash va tanlash
                         </button>
                       </div>
                     </div>
                   )}
-                </>
+
+                  {/* Nasiya uchun ogohlantirish */}
+                  {hasDebt && !searchQuery && !showNewForm && (
+                    <p className="text-xs text-amber-600 text-center py-1.5 bg-amber-50 rounded-lg">
+                      ⚠️ Nasiya uchun mijoz tanlash yoki qo&apos;shish shart
+                    </p>
+                  )}
+                </div>
               )}
             </div>
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="flex gap-3 p-5 pt-3 border-t border-gray-100 bg-white flex-shrink-0">
+        {/* ── Footer ── */}
+        <div className="p-4 border-t bg-gray-50 flex gap-3">
           <button
             onClick={onClose}
-            className="flex-1 py-3 rounded-xl border-2 border-gray-200 text-gray-600 font-semibold hover:bg-gray-50 transition-colors"
+            className="flex-1 py-3 border-2 border-gray-200 rounded-xl font-bold
+                       text-gray-600 hover:bg-white transition-all text-sm"
           >
-            Bekor qilish
+            Yopish
           </button>
           <button
             onClick={handleConfirm}
             disabled={isSubmitting || isOverpaid || !customerInfoValid}
-            className="flex-1 py-3 rounded-xl bg-indigo-600 text-white font-semibold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="flex-[2] py-3 bg-indigo-600 text-white rounded-xl font-bold text-sm
+                       hover:bg-indigo-700 shadow-lg shadow-indigo-100/50
+                       disabled:opacity-50 transition-all flex items-center justify-center gap-2"
           >
             {isSubmitting ? (
-              <span className="flex items-center justify-center gap-2">
-                <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                Saqlanmoqda...
-              </span>
+              <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
             ) : (
-              'Tasdiqlash'
+              "To'lovni tasdiqlash"
             )}
           </button>
         </div>

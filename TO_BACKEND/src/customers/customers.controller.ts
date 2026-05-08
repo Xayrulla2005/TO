@@ -1,8 +1,10 @@
+// path: src/modules/customers/customers.controller.ts
+
 import {
   Controller, Get, Post, Put, Delete,
-  Body, Param, Query, UseGuards, HttpCode, HttpStatus,
+  Body, Param, Query, UseGuards, HttpCode, HttpStatus, ParseUUIDPipe,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse } from '@nestjs/swagger';
 import { CustomersService } from './customers.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
@@ -18,67 +20,74 @@ import { UserRole } from '../common/dto/roles.enum';
 export class CustomersController {
   constructor(private readonly service: CustomersService) {}
 
-  // ── GET /customers?search=xxx ─────────────────────────────
   @Get()
   @Roles(UserRole.ADMIN, UserRole.SALER)
-  @ApiOperation({ summary: 'Barcha mijozlar (qidirish bilan)' })
-  @ApiQuery({ name: 'search', required: false })
-  findAll(@Query('search') search?: string) {
-    return this.service.findAll(search);
+  @ApiOperation({ summary: 'Barcha mijozlar (qidirish va pagination bilan)' })
+  @ApiQuery({ name: 'search', required: false, description: 'Ism yoki telefon bo\'yicha qidiruv' })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, example: 20 })
+  findAll(
+    @Query('search') search?: string,
+    @Query('page') page: number = 1,
+    @Query('limit') limit: number = 20,
+  ) {
+    // Service-da pagination qo'shganimiz sababli parametrlarni uzatamiz
+    return this.service.findAll(search, +page, +limit);
   }
 
-  // ── GET /customers/:id ────────────────────────────────────
   @Get(':id')
   @Roles(UserRole.ADMIN, UserRole.SALER)
-  @ApiOperation({ summary: 'Bitta mijoz' })
-  findOne(@Param('id') id: string) {
+  @ApiOperation({ summary: 'Bitta mijozni ID bo\'yicha olish' })
+  findOne(@Param('id', ParseUUIDPipe) id: string) {
+    // ParseUUIDPipe orqali noto'g'ri formatdagi ID-larni bazaga yubormasdan to'xtatamiz
     return this.service.findOne(id);
   }
 
-  // ── GET /customers/:id/sales ──────────────────────────────
   @Get(':id/sales')
   @Roles(UserRole.ADMIN, UserRole.SALER)
-  @ApiOperation({ summary: 'Mijoz savdo tarixi' })
-  @ApiQuery({ name: 'page', required: false })
-  @ApiQuery({ name: 'limit', required: false })
+  @ApiOperation({ summary: 'Mijozning muvaffaqiyatli savdo tarixi' })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, example: 20 })
   getSales(
-    @Param('id') id: string,
-    @Query('page') page = 1,
-    @Query('limit') limit = 20,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('page') page: number = 1,
+    @Query('limit') limit: number = 20,
   ) {
     return this.service.getSalesHistory(id, +page, +limit);
   }
 
-  // ── GET /customers/:id/stats ──────────────────────────────
   @Get(':id/stats')
   @Roles(UserRole.ADMIN, UserRole.SALER)
-  @ApiOperation({ summary: 'Mijoz statistikasi' })
-  getStats(@Param('id') id: string) {
+  @ApiOperation({ summary: 'Mijozning umumiy statistikasi va qarzdorligi' })
+  getStats(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.getStats(id);
   }
 
-  // ── POST /customers ───────────────────────────────────────
   @Post()
   @Roles(UserRole.ADMIN, UserRole.SALER)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Yangi mijoz qo\'shish' })
+  @ApiResponse({ status: 201, description: 'Mijoz muvaffaqiyatli yaratildi' })
+  @ApiResponse({ status: 409, description: 'Telefon raqam allaqachon mavjud' })
   create(@Body() dto: CreateCustomerDto) {
     return this.service.create(dto);
   }
 
-  // ── PUT /customers/:id ────────────────────────────────────
   @Put(':id')
   @Roles(UserRole.ADMIN, UserRole.SALER)
-  @ApiOperation({ summary: 'Mijozni yangilash' })
-  update(@Param('id') id: string, @Body() dto: UpdateCustomerDto) {
+  @ApiOperation({ summary: 'Mijoz ma\'lumotlarini tahrirlash' })
+  update(
+    @Param('id', ParseUUIDPipe) id: string, 
+    @Body() dto: UpdateCustomerDto
+  ) {
     return this.service.update(id, dto);
   }
 
-  // ── DELETE /customers/:id ─────────────────────────────────
   @Delete(':id')
   @Roles(UserRole.ADMIN)
-  @ApiOperation({ summary: 'Mijozni o\'chirish (faqat ADMIN)' })
-  remove(@Param('id') id: string) {
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Mijozni o\'chirish (Faqat Admin)' })
+  remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.remove(id);
   }
 }

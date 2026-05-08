@@ -21,19 +21,21 @@ export function CategoriesPage() {
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
+  // ✅ staleTime qo'shildi — kategoriyalar kamdan-kam o'zgaradi
   const { data: categories, isLoading } = useQuery({
-    queryKey: ['categories'],
-    queryFn: categoriesApi.getAll,
+    queryKey:  ['categories'],
+    queryFn:   categoriesApi.getAll,
+    staleTime: 10 * 60_000,
   });
 
   const deleteMutation = useMutation({
     mutationFn: categoriesApi.delete,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['categories'] });
-      toast.success('Category deleted');
+      toast.success('Kategoriya o\'chirildi');
       setDeletingId(null);
     },
-    onError: () => toast.error('Failed to delete category (might contain products)'),
+    onError: () => toast.error('Kategoriyani o\'chirib bo\'lmadi (mahsulotlar mavjud bo\'lishi mumkin)'),
   });
 
   const handleEdit = (cat: Category) => {
@@ -46,7 +48,6 @@ export function CategoriesPage() {
     setIsFormOpen(true);
   };
 
-  // ✅ FIX 1: Modal yopilganda queryni invalidate qilish
   const handleFormClose = () => {
     setIsFormOpen(false);
     setEditingCategory(null);
@@ -80,7 +81,7 @@ export function CategoriesPage() {
               <TableHead className="w-16">Icon</TableHead>
               <TableHead>Kategoriya nomi</TableHead>
               <TableHead>Mahsulot</TableHead>
-              {isAdmin && <TableHead className="text-right">Actions</TableHead>}
+              {isAdmin && <TableHead className="text-right">Amallar</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -93,8 +94,7 @@ export function CategoriesPage() {
                 </TableCell>
                 <TableCell className="font-medium text-gray-900">{cat.name}</TableCell>
                 <TableCell className="text-gray-500">
-                  {/* ✅ FIX 2: _count.products yoki products array uzunligi */}
-                  {cat._count?.products ?? cat.products?.length ?? 0} items
+                  {cat._count?.products ?? cat.products?.length ?? 0} ta
                 </TableCell>
                 {isAdmin && (
                   <TableCell className="text-right">
@@ -119,7 +119,7 @@ export function CategoriesPage() {
             {categories?.length === 0 && (
               <TableRow>
                 <TableCell colSpan={isAdmin ? 4 : 3} className="text-center py-8 text-gray-500">
-                  No categories found. Create one to get started.
+                  Kategoriyalar topilmadi. Yangi kategoriya qo'shing.
                 </TableCell>
               </TableRow>
             )}
@@ -127,7 +127,6 @@ export function CategoriesPage() {
         </Table>
       </Card>
 
-      {/* ✅ FIX 3: onClose va onSuccess to'g'ri uzatildi */}
       <CategoryFormModal
         isOpen={isFormOpen}
         onClose={handleFormClose}
@@ -135,28 +134,23 @@ export function CategoriesPage() {
         categoryToEdit={editingCategory}
       />
 
-      <Modal
-        isOpen={!!deletingId}
-        onClose={() => setDeletingId(null)}
-        title="Confirm Deletion"
-        size="sm"
-      >
+      <Modal isOpen={!!deletingId} onClose={() => setDeletingId(null)} title="O'chirishni tasdiqlash" size="sm">
         <div className="space-y-4">
           <div className="flex items-center gap-3 text-red-600 bg-red-50 p-3 rounded-lg">
             <AlertTriangle size={24} />
-            <p className="text-sm font-medium">This action cannot be undone.</p>
+            <p className="text-sm font-medium">Bu amalni qaytarib bo'lmaydi.</p>
           </div>
           <p className="text-gray-600">
-            Are you sure you want to delete this category? Products in this category might be affected.
+            Bu kategoriyani o'chirishni tasdiqlaysizmi? Undagi mahsulotlar ta'sirlanishi mumkin.
           </p>
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setDeletingId(null)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setDeletingId(null)}>Bekor</Button>
             <Button
               variant="danger"
               isLoading={deleteMutation.isPending}
               onClick={() => deletingId && deleteMutation.mutate(deletingId)}
             >
-              Kategoriyani ochirish
+              O'chirish
             </Button>
           </div>
         </div>

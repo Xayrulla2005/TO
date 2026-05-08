@@ -1,11 +1,37 @@
-// src/sales/receipt.service.ts — v6
+// TO_BACKEND/src/sale/resipt.service.ts
+// Tuzatish: Oldingi qarz hisob-kitobi
+// customer.totalDebt — mijozning JORIY umumiy qarzi (CustomerEntity da increment/decrement bilan saqlanadi)
+// prevDebt = customer.totalDebt - currentSaleDebt
+
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Response } from 'express';
 import PDFDocument from 'pdfkit';
 import { SaleEntity } from '../sale/entities/sale.entity';
-import { DebtEntity, DebtStatus } from '../debts/entities/debt.entity';
+import { DebtEntity } from '../debts/entities/debt.entity';
+
+const money = (v: number | string | null | undefined): string => {
+  const n = Number(v ?? 0);
+  return (
+    n.toLocaleString('uz-UZ', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    }) + ' $'
+  );
+};
+
+const toDate = (d?: Date | string | null): string => {
+  if (!d) return '-';
+  return new Date(d).toLocaleString('uz-UZ', {
+    timeZone: 'Asia/Tashkent',
+    day:      '2-digit',
+    month:    '2-digit',
+    year:     'numeric',
+    hour:     '2-digit',
+    minute:   '2-digit',
+  });
+};
 
 @Injectable()
 export class ReceiptService {
@@ -14,323 +40,296 @@ export class ReceiptService {
     private readonly debtRepository: Repository<DebtEntity>,
   ) {}
 
-  async generateReceipt(sale: SaleEntity, res: Response) {
-    const doc = new PDFDocument({ margin: 40, size: 'A4' });
+  async generateReceipt(sale: SaleEntity, res: Response): Promise<void> {
+    const debtInfo = await this.resolveDebtInfo(sale);
+
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename=receipt-${sale.saleNumber}.pdf`);
+    res.setHeader('Content-Disposition', `inline; filename=chek-${sale.saleNumber}.pdf`);
+
+    const doc = new PDFDocument({ margin: 0, size: 'A5', bufferPages: false });
+    doc.on('error', (err) => { console.error('PDF xato:', err); if (!res.writableEnded) res.end(); });
     doc.pipe(res);
 
-    const W = doc.page.width;
-    const L = 40; const R = W - 40; const PW = R - L;
+    try {
+      this.build(doc, sale, debtInfo);
+      doc.end();
+    } catch (err) {
+      console.error('PDF build xato:', err);
+      if (!res.writableEnded) res.status(500).send('PDF xato');
+    }
+  }
 
-    const fmt = (v: number | string) =>
-      '$' + Number(v).toLocaleString('uz-UZ', { minimumFractionDigits: 0, maximumFractionDigits: 4 });
+  // ─── Qarz hisob-kitobi ───────────────────────────────────
+  private async resolveDebtInfo(sale: SaleEntity) {
+    const customer = (sale as any).customer;
 
-    const fmtDate = (d?: Date | string) => {
-      if (!d) return '-';
-      return new Date(d).toLocaleDateString('uz-UZ', { timeZone: 'Asia/Tashkent', day: '2-digit', month: '2-digit', year: 'numeric' });
-    };
-    const fmtTime = (d?: Date | string) => {
-      if (!d) return '';
-      return new Date(d).toLocaleTimeString('uz-UZ', { timeZone: 'Asia/Tashkent', hour: '2-digit', minute: '2-digit' });
-    };
-    const payLabel = (m: string) =>
-      m === 'CASH' ? 'Naqd pul' : m === 'CARD' ? 'Plastik karta' : m === 'DEBT' ? 'Nasiya' : m;
-
-    const hline = (y: number, lw = 0.5, color = '#cccccc') =>
-      doc.save().moveTo(L, y).lineTo(R, y).lineWidth(lw).strokeColor(color).stroke().restore();
-
-    const fillRect = (x: number, y: number, w: number, h: number, color: string) =>
-      doc.save().rect(x, y, w, h).fillColor(color).fill().restore();
-
-    const cell = (txt: string, x: number, y: number, w: number,
-      opts: { align?: 'left' | 'right' | 'center'; bold?: boolean; size?: number; color?: string } = {}) =>
-      doc.save().font(opts.bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(opts.size || 9)
-        .fillColor(opts.color || '#1a1a1a')
-        .text(txt, x + 4, y + 3, { width: w - 8, align: opts.align || 'left', lineBreak: false }).restore();
-
-    // ── Resolve debt values ────────────────────────────────────────────────────
-    // Priority:
-    //   1. debtSummary attached by getSaleWithDebtSummary / completeSale (most accurate)
-    //   2. Real-time sum from DebtEntity table grouped by customer (always correct)
-    //   3. sale.debt.remainingAmount as last resort (no customer linked)
-
-    const debtSummary = (sale as any).debtSummary as {
-      previousDebt: number;
-      currentSaleDebt: number;
-      totalDebtAfter: number;
-    } | undefined;
-
-    const customer = (sale as any).customer as { id?: string; name?: string; phone?: string; totalDebt?: number } | null | undefined;
+    // Bu savdodagi qarz miqdori
     const debtPayment = (sale.payments ?? []).find(p => p.method === 'DEBT');
+    const currentDebt = Math.round(
+      Number(
+        (sale as any).debtSummary?.currentSaleDebt ??
+        debtPayment?.amount ??
+        0,
+      ) * 100,
+    ) / 100;
 
-    // currentSaleDebt: amount of debt recorded in this specific sale
-    const currentSaleDebt: number = debtSummary
-      ? parseFloat(Number(debtSummary.currentSaleDebt).toFixed(4))
-      : debtPayment
-        ? parseFloat(Number(debtPayment.amount).toFixed(4))
-        : 0;
+    // ✅ ASOSIY TUZATISH:
+    // customer.totalDebt — CustomerEntity da real vaqtda saqlanadigan JORIY umumiy qarz
+    // Bu completeSale() da increment qilingan — eng ishonchli manba
+    // prevDebt = totalDebt - currentDebt (bu savdodan oldingi qarz)
+    const totalDebt = Math.round(Number(customer?.totalDebt ?? 0) * 100) / 100;
+    const prevDebt  = Math.max(0, Math.round((totalDebt - currentDebt) * 100) / 100);
 
-    // totalCustomerDebt: real-time sum of all unpaid/partial debts for this customer
-    // Always recalculate from DebtEntity — never trust customer.totalDebt cache.
-    let totalCustomerDebt = 0;
+    return {
+      currentDebt,
+      prevDebt,
+      totalDebt,
+      hasDebt: totalDebt > 0 || currentDebt > 0,
+    };
+  }
 
-    if (customer?.id) {
-      // Fetch all active debts for this customer directly from the debt table.
-      // We join on debtorPhone via the customer record because DebtEntity does
-      // not have a direct customerId FK in this schema — it stores debtorPhone.
-      // Using phone as the join key mirrors how completeSale links debts to customers.
-      const customerPhone = customer.phone;
+  // ─── Chek qurish ─────────────────────────────────────────
+  private build(
+    doc: PDFKit.PDFDocument,
+    sale: SaleEntity,
+    debt: { currentDebt: number; prevDebt: number; totalDebt: number; hasDebt: boolean },
+  ): void {
+    const L  = 20;
+    const R  = doc.page.width - 20;
+    const PW = R - L;
+    let y    = 20;
 
-      if (customerPhone) {
-        const activeDebts = await this.debtRepository
-          .createQueryBuilder('debt')
-          .where('debt.debtorPhone = :phone', { phone: customerPhone })
-          .andWhere('debt.status IN (:...statuses)', {
-            statuses: [DebtStatus.PENDING, DebtStatus.PARTIALLY_PAID],
-          })
-          .select(['debt.remainingAmount'])
-          .getMany();
+    const customer = (sale as any).customer;
+    const seller   = (sale as any).createdBy;
+    const payments = sale.payments ?? [];
 
-        totalCustomerDebt = parseFloat(
-          activeDebts
-            .reduce((sum, d) => sum + parseFloat(Number(d.remainingAmount).toFixed(4)), 0)
-            .toFixed(4),
-        );
-      }
-    } else if (debtSummary) {
-      // No customer record but debtSummary was computed by the service layer
-      totalCustomerDebt = parseFloat(Number(debtSummary.totalDebtAfter).toFixed(4));
-    } else if (debtPayment && sale.debt) {
-      // Absolute last resort: use this sale's own debt entity remaining amount
-      totalCustomerDebt = parseFloat(Number(sale.debt.remainingAmount || 0).toFixed(4));
-    }
+    const cashAmt = payments.filter(p => p.method === 'CASH').reduce((s, p) => s + Number(p.amount), 0);
+    const cardAmt = payments.filter(p => p.method === 'CARD').reduce((s, p) => s + Number(p.amount), 0);
+    const debtAmt = payments.filter(p => p.method === 'DEBT').reduce((s, p) => s + Number(p.amount), 0);
 
-    // previousDebt: what the customer owed before THIS sale
-    // = totalCustomerDebt minus the debt added by this sale (if still unpaid)
-    // If debtSummary is available use it directly (it was captured at completion time).
-    const previousDebt: number = debtSummary
-      ? parseFloat(Number(debtSummary.previousDebt).toFixed(4))
-      : parseFloat(Math.max(0, totalCustomerDebt - currentSaleDebt).toFixed(4));
+    // ── HEADER ───────────────────────────────────────────────
+    doc.rect(L, y, PW, 46).fill('#1e293b');
+    doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(16)
+       .text('TANIROVKA OPTOM', L, y + 8, { width: PW, align: 'center' });
+    doc.fillColor('#94a3b8').font('Helvetica').fontSize(8)
+       .text('Savdo cheki', L, y + 30, { width: PW, align: 'center' });
+    y += 52;
 
-    const hasAnyDebt = totalCustomerDebt > 0.001;
-    const isFullyClean = !hasAnyDebt;
-
-    // ── HEADER ─────────────────────────────────────────────────────────────────
-    fillRect(L, 40, PW, 44, '#1e293b');
-    doc.save().font('Helvetica-Bold').fontSize(18).fillColor('#ffffff').text('TANIROVKA OPTOM', L, 50, { width: PW, align: 'center' }).restore();
-    fillRect(L, 84, PW, 20, '#334155');
-    doc.save().font('Helvetica').fontSize(9).fillColor('#94a3b8').text('HISOB-FAKTURA / RECEIPT', L, 89, { width: PW, align: 'center' }).restore();
-
-    let y = 116;
-
-    // ── Sale info ──────────────────────────────────────────────────────────────
-    doc.save().font('Helvetica-Bold').fontSize(9).fillColor('#64748b').text('Chek raqami:', L, y).restore();
-    doc.save().font('Helvetica-Bold').fontSize(10).fillColor('#1e293b').text(sale.saleNumber, L + 70, y).restore();
-    const saleDate = sale.completedAt || sale.createdAt;
-    doc.save().font('Helvetica').fontSize(9).fillColor('#64748b').text(`${fmtDate(saleDate)}  ${fmtTime(saleDate)}`, L, y, { width: PW, align: 'right' }).restore();
+    // ── CHEK RAQAM + SANA ────────────────────────────────────
+    this.line(doc, L, R, y);
+    y += 6;
+    doc.fillColor('#64748b').font('Helvetica').fontSize(8).text('Chek:', L, y);
+    doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(8)
+       .text(`#${sale.saleNumber}`, L + 38, y);
+    doc.fillColor('#64748b').font('Helvetica').fontSize(8)
+       .text(toDate(sale.completedAt || sale.createdAt), L, y, { width: PW, align: 'right' });
     y += 16;
-    doc.save().font('Helvetica').fontSize(9).fillColor('#64748b').text(`Sotuvchi: `, L, y).restore();
-    doc.save().font('Helvetica').fontSize(9).fillColor('#1e293b').text(sale.createdBy?.fullName || '-', L + 50, y).restore();
-    y += 20;
-    hline(y, 0.5, '#e2e8f0'); y += 8;
 
-    // ── Mijoz ──────────────────────────────────────────────────────────────────
-    const customerName = customer?.name || sale.debt?.debtorName;
-    const customerPhone = customer?.phone || sale.debt?.debtorPhone;
-
-    if (customerName || customerPhone) {
-      const isDebtSale = !!debtPayment;
-      const bgColor = isDebtSale ? '#fef3c7' : '#f0f9ff';
-      const titleColor = isDebtSale ? '#92400e' : '#075985';
-      const textColor = isDebtSale ? '#78350f' : '#0c4a6e';
-      fillRect(L, y, PW, 32, bgColor);
-      doc.save().font('Helvetica-Bold').fontSize(9).fillColor(titleColor)
-        .text(isDebtSale ? "NASIYA OLUVCHI MA'LUMOTLARI" : "MIJOZ MA'LUMOTLARI", L + 8, y + 6).restore();
-      if (customerName) doc.save().font('Helvetica').fontSize(9).fillColor(textColor).text(`Mijoz: ${customerName}`, L + 8, y + 19).restore();
-      if (customerPhone) doc.save().font('Helvetica').fontSize(9).fillColor(textColor).text(`Tel: ${customerPhone}`, L + 200, y + 19).restore();
-      y += 38;
-    }
-
-    // ── TABLE ──────────────────────────────────────────────────────────────────
-    const hasAnyDiscount = sale.items.some(item =>
-      Number(item.baseUnitPrice) > 0 && Number(item.customUnitPrice) < Number(item.baseUnitPrice),
-    );
-    const col = hasAnyDiscount
-      ? { no: { x: L, w: 22 }, name: { x: L + 22, w: 185 }, qty: { x: L + 207, w: 50 }, origPrice: { x: L + 257, w: 70 }, discount: { x: L + 327, w: 55 }, price: { x: L + 382, w: 70 }, total: { x: L + 452, w: 63 } }
-      : { no: { x: L, w: 25 }, name: { x: L + 25, w: 225 }, qty: { x: L + 250, w: 65 }, origPrice: { x: L + 315, w: 0 }, discount: { x: L + 315, w: 0 }, price: { x: L + 315, w: 100 }, total: { x: L + 415, w: 100 } };
-
-    doc.save().rect(L, y, PW, 22).fillColor('#1e293b').fill().restore();
-    cell('Nr', col.no.x, y, col.no.w, { bold: true, color: '#ffffff', align: 'center' });
-    cell('Mahsulot', col.name.x, y, col.name.w, { bold: true, color: '#ffffff' });
-    cell('Miqdor', col.qty.x, y, col.qty.w, { bold: true, color: '#ffffff', align: 'center' });
-    if (hasAnyDiscount) {
-      cell('Asl narx', col.origPrice.x, y, col.origPrice.w, { bold: true, color: '#94a3b8', align: 'right', size: 8 });
-      cell('Chegirma', col.discount.x, y, col.discount.w, { bold: true, color: '#fbbf24', align: 'center', size: 8 });
-    }
-    cell('Narxi', col.price.x, y, col.price.w, { bold: true, color: '#ffffff', align: 'right' });
-    cell('Jami', col.total.x, y, col.total.w, { bold: true, color: '#ffffff', align: 'right' });
-    y += 22;
-
-    const vlines = hasAnyDiscount
-      ? [col.no.x + col.no.w, col.qty.x, col.origPrice.x, col.discount.x, col.price.x, col.total.x]
-      : [col.no.x + col.no.w, col.qty.x, col.price.x, col.total.x];
-
-    let originalSubtotal = 0;
-    sale.items.forEach((item, idx) => {
-      const rowBg = idx % 2 === 0 ? '#f8fafc' : '#ffffff';
-      const nameLines = Math.ceil(item.productNameSnapshot.length / (hasAnyDiscount ? 22 : 28));
-      const rowH = Math.max(20, nameLines * 12 + 8);
-      fillRect(L, y, PW, rowH, rowBg);
-      const basePrice = Number(item.baseUnitPrice);
-      const customPrice = Number(item.customUnitPrice);
-      const quantity = parseFloat(item.quantity.toString());
-      const itemTotal = Number(item.customTotal) - Number(item.discountAmount);
-      originalSubtotal += basePrice * quantity;
-      const discPct = basePrice > 0 && customPrice < basePrice
-        ? parseFloat(((1 - customPrice / basePrice) * 100).toFixed(1))
-        : 0;
-      cell(`${idx + 1}`, col.no.x, y, col.no.w, { align: 'center', color: '#64748b', size: 8 });
-      doc.save().font('Helvetica').fontSize(9).fillColor('#1e293b').text(item.productNameSnapshot, col.name.x + 4, y + 3, { width: col.name.w - 8, lineBreak: true }).restore();
-      cell(String(quantity), col.qty.x, y, col.qty.w, { align: 'center' });
-      if (hasAnyDiscount) {
-        if (discPct > 0) {
-          doc.save().font('Helvetica').fontSize(8).fillColor('#94a3b8').text(fmt(basePrice), col.origPrice.x + 4, y + 3, { width: col.origPrice.w - 8, align: 'right', lineBreak: false }).restore();
-          doc.save().moveTo(col.origPrice.x + 4, y + 7).lineTo(col.origPrice.x + col.origPrice.w - 4, y + 7).lineWidth(0.8).strokeColor('#94a3b8').stroke().restore();
-          fillRect(col.discount.x + 4, y + 3, col.discount.w - 8, 14, '#fef3c7');
-          doc.save().font('Helvetica-Bold').fontSize(8).fillColor('#d97706').text(`-${discPct}%`, col.discount.x + 4, y + 5, { width: col.discount.w - 8, align: 'center', lineBreak: false }).restore();
-        } else {
-          cell(fmt(basePrice), col.origPrice.x, y, col.origPrice.w, { align: 'right', color: '#94a3b8', size: 8 });
-          cell('-', col.discount.x, y, col.discount.w, { align: 'center', color: '#cbd5e1', size: 8 });
-        }
-      }
-      cell(fmt(customPrice), col.price.x, y, col.price.w, { align: 'right', color: discPct > 0 ? '#1d4ed8' : '#1a1a1a', bold: discPct > 0 });
-      cell(fmt(itemTotal), col.total.x, y, col.total.w, { align: 'right', bold: true });
-      hline(y + rowH, 0.3, '#e2e8f0');
-      vlines.forEach(vx => doc.save().moveTo(vx, y).lineTo(vx, y + rowH).lineWidth(0.3).strokeColor('#e2e8f0').stroke().restore());
-      y += rowH;
-    });
-
-    const tableStartY = y - sale.items.reduce((s, item) =>
-      s + Math.max(20, Math.ceil(item.productNameSnapshot.length / (hasAnyDiscount ? 22 : 28)) * 12 + 8), 0) - 22;
-    doc.save().rect(L, tableStartY, PW, y - tableStartY).lineWidth(0.8).strokeColor('#1e293b').stroke().restore();
+    // ── SOTUVCHI + MIJOZ ─────────────────────────────────────
+    this.line(doc, L, R, y);
     y += 6;
 
-    // ── Chegirmalar ────────────────────────────────────────────────────────────
-    const grandTotal = Number(sale.grandTotal);
-    const totalDiscount = Number(sale.totalDiscount);
-    const itemPriceDiscount = sale.items.reduce((sum, item) =>
-      sum + Math.max(0, (Number(item.baseUnitPrice) - Number(item.customUnitPrice)) * parseFloat(item.quantity.toString())), 0);
-    const overallDiscPct = originalSubtotal > 0
-      ? parseFloat(((1 - grandTotal / originalSubtotal) * 100).toFixed(2))
-      : 0;
+    const sellerName = seller?.fullName || seller?.username || '-';
+    doc.fillColor('#64748b').font('Helvetica').fontSize(8).text('Sotuvchi:', L, y);
+    doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(8)
+       .text(sellerName, L + 54, y, { width: PW - 54 });
+    y += 14;
 
-    if (itemPriceDiscount > 0) {
-      const pct = originalSubtotal > 0 ? parseFloat(((itemPriceDiscount / originalSubtotal) * 100).toFixed(2)) : 0;
-      fillRect(L, y, PW, 18, '#eff6ff');
-      doc.save().font('Helvetica').fontSize(9).fillColor('#3b82f6').text(`Narx chegirmasi (-${pct}%)`, L + 8, y + 4).restore();
-      doc.save().font('Helvetica-Bold').fontSize(9).fillColor('#3b82f6').text(`-${fmt(itemPriceDiscount)}`, L, y + 4, { width: PW - 8, align: 'right' }).restore();
-      y += 18;
+    if (customer) {
+      doc.fillColor('#64748b').font('Helvetica').fontSize(8).text('Mijoz:', L, y);
+      doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(8)
+         .text(customer.name, L + 54, y, { width: PW - 140, lineBreak: false });
+      if (customer.phone) {
+        doc.fillColor('#475569').font('Helvetica').fontSize(8)
+           .text(customer.phone, L, y, { width: PW, align: 'right' });
+      }
+      y += 14;
     }
-    if (totalDiscount > 0) {
-      const pct = originalSubtotal > 0 ? parseFloat(((totalDiscount / originalSubtotal) * 100).toFixed(2)) : 0;
-      fillRect(L, y, PW, 18, '#fef9c3');
-      doc.save().font('Helvetica').fontSize(9).fillColor('#ca8a04').text(`Qo'shimcha chegirma (-${pct}%)`, L + 8, y + 4).restore();
-      doc.save().font('Helvetica-Bold').fontSize(9).fillColor('#ca8a04').text(`-${fmt(totalDiscount)}`, L, y + 4, { width: PW - 8, align: 'right' }).restore();
-      y += 18;
-    }
-    if (overallDiscPct > 0) {
-      fillRect(L, y, PW, 18, '#f0fdf4');
-      doc.save().font('Helvetica').fontSize(9).fillColor('#16a34a').text(`Umumiy tejam`, L + 8, y + 4).restore();
-      doc.save().font('Helvetica-Bold').fontSize(9).fillColor('#16a34a').text(`-${fmt(originalSubtotal - grandTotal)} (${overallDiscPct}%)`, L, y + 4, { width: PW - 8, align: 'right' }).restore();
-      y += 18;
-    }
+
+    // ── MAHSULOTLAR JADVALI ───────────────────────────────────
+    y += 4;
+    this.line(doc, L, R, y);
     y += 4;
 
-    // ── Grand Total ────────────────────────────────────────────────────────────
-    fillRect(L, y, PW, 28, '#1e293b');
-    doc.save().font('Helvetica-Bold').fontSize(12).fillColor('#ffffff').text('JAMI SUMMA:', L + 8, y + 7).restore();
-    doc.save().font('Helvetica-Bold').fontSize(14).fillColor('#fbbf24').text(fmt(grandTotal), L, y + 5, { width: PW - 8, align: 'right' }).restore();
-    if (overallDiscPct > 0) doc.save().font('Helvetica').fontSize(8).fillColor('#94a3b8').text(`(Asl: ${fmt(originalSubtotal)})`, L + 8, y + 18).restore();
-    y += 36;
+    const col = {
+      name:  { x: L,             w: PW * 0.38 },
+      unit:  { x: L + PW * 0.38, w: PW * 0.10 },
+      qty:   { x: L + PW * 0.48, w: PW * 0.10 },
+      price: { x: L + PW * 0.58, w: PW * 0.21 },
+      total: { x: L + PW * 0.79, w: PW * 0.21 },
+    };
 
-    // ── TO'LOV MA'LUMOTLARI — faqat CASH va CARD ──────────────────────────────
-    const nonDebtPayments = (sale.payments || []).filter(p => p.method !== 'DEBT');
-    if (nonDebtPayments.length > 0) {
-      y += 6;
-      fillRect(L, y, PW, 18, '#f1f5f9');
-      doc.save().font('Helvetica-Bold').fontSize(9).fillColor('#475569').text("TO'LOV MA'LUMOTLARI", L + 8, y + 4).restore();
-      y += 18;
-      nonDebtPayments.forEach(p => {
-        fillRect(L, y, PW, 18, '#f0fdf4');
-        doc.save().font('Helvetica').fontSize(9).fillColor('#16a34a').text(payLabel(p.method), L + 8, y + 4).restore();
-        doc.save().font('Helvetica-Bold').fontSize(9).fillColor('#16a34a').text(fmt(p.amount), L, y + 4, { width: PW - 8, align: 'right' }).restore();
-        hline(y + 18, 0.3, '#e2e8f0');
-        y += 18;
-      });
-      doc.save().rect(L, y - nonDebtPayments.length * 18 - 18, PW, 18 + nonDebtPayments.length * 18).lineWidth(0.5).strokeColor('#cbd5e1').stroke().restore();
-    }
-
-    // ════════════════════════════════════════════════════════════════════════════
-    // QARZDORLIK HOLATI
-    // totalCustomerDebt — real-time sum of remainingAmount from DebtEntity table.
-    // previousDebt      — total before this sale (totalCustomerDebt - currentSaleDebt).
-    // currentSaleDebt   — debt amount added by this sale.
-    //
-    // Layout:
-    //   [header]
-    //   Oldingi qarz:       previousDebt     (only if previousDebt > 0)
-    //   Bu savdo nasiyasi:  currentSaleDebt  (only if currentSaleDebt > 0)
-    //   UMUMIY QOLDIQ:      totalCustomerDebt (always shown)
-    // ════════════════════════════════════════════════════════════════════════════
-    y += 8;
-
-    const showPreviousDebtRow = previousDebt > 0.001;
-    const showThisDebtRow = currentSaleDebt > 0.001;
-    const blockStartY = y;
-
-    // Header bar
-    fillRect(L, y, PW, 18, hasAnyDebt ? '#1e3a5f' : '#14532d');
-    doc.save().font('Helvetica-Bold').fontSize(9).fillColor('#ffffff').text('QARZDORLIK HOLATI', L + 8, y + 4).restore();
+    // Jadval sarlavhasi
+    doc.rect(L, y, PW, 18).fill('#334155');
+    doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(7.5);
+    doc.text('Mahsulot', col.name.x + 4, y + 5);
+    doc.text("O'lchov",  col.unit.x,      y + 5, { width: col.unit.w,  align: 'center' });
+    doc.text('Miqdor',   col.qty.x,       y + 5, { width: col.qty.w,   align: 'center' });
+    doc.text('Narx',     col.price.x,     y + 5, { width: col.price.w, align: 'right'  });
+    doc.text('Jami',     col.total.x - 4, y + 5, { width: col.total.w, align: 'right'  });
     y += 18;
 
-    // Oldingi qarz row
-    if (showPreviousDebtRow) {
-      fillRect(L, y, PW, 18, '#f8fafc');
-      doc.save().font('Helvetica').fontSize(9).fillColor('#64748b').text('Oldingi qarz:', L + 8, y + 4).restore();
-      doc.save().font('Helvetica-Bold').fontSize(9).fillColor('#64748b').text(fmt(previousDebt), L, y + 4, { width: PW - 8, align: 'right' }).restore();
-      hline(y + 18, 0.3, '#e2e8f0');
-      y += 18;
+    // Mahsulot qatorlari
+    sale.items.forEach((item, i) => {
+      const base    = Number(item.baseUnitPrice ?? item.customUnitPrice);
+      const custom  = Number(item.customUnitPrice);
+      const isDisc  = custom < base - 0.01;
+      const rowH    = isDisc ? 30 : 24;
+
+      doc.rect(L, y, PW, rowH).fill(i % 2 === 0 ? '#f8fafc' : '#ffffff');
+
+      // Nomi
+      doc.fillColor('#1e293b').font('Helvetica').fontSize(8)
+         .text(item.productNameSnapshot, col.name.x + 4, y + (isDisc ? 4 : 8),
+               { width: col.name.w - 8, lineBreak: false });
+
+      // O'lchov
+      doc.fillColor('#64748b').font('Helvetica').fontSize(7.5)
+         .text(item.unitSnapshot || 'dona', col.unit.x, y + (isDisc ? 11 : 8),
+               { width: col.unit.w, align: 'center', lineBreak: false });
+
+      // Miqdor
+      const qtyStr = parseFloat(Number(item.quantity).toFixed(4)).toString();
+      doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(8)
+         .text(qtyStr, col.qty.x, y + (isDisc ? 11 : 8),
+               { width: col.qty.w, align: 'center', lineBreak: false });
+
+      // Narx
+      if (isDisc) {
+        // Asl narx — kulrang, ustiga chiziq
+        doc.fillColor('#94a3b8').font('Helvetica').fontSize(6.5)
+           .text(money(base), col.price.x, y + 4,
+                 { width: col.price.w, align: 'right', lineBreak: false });
+        const lineY = y + 8;
+        doc.moveTo(col.price.x + 5, lineY)
+           .lineTo(col.price.x + col.price.w - 2, lineY)
+           .lineWidth(0.5).strokeColor('#94a3b8').stroke();
+        // Chegirma narxi — yashil
+        doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(8)
+           .text(money(custom), col.price.x, y + 15,
+                 { width: col.price.w, align: 'right', lineBreak: false });
+        const pct = Math.round((1 - custom / base) * 100);
+        doc.fillColor('#16a34a').font('Helvetica').fontSize(6.5)
+           .text(`-${pct}%`, col.name.x + 4, y + 17, { lineBreak: false });
+      } else {
+        doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(8)
+           .text(money(custom), col.price.x, y + 8,
+                 { width: col.price.w, align: 'right', lineBreak: false });
+      }
+
+      // Jami
+      doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(9)
+         .text(money(item.customTotal), col.total.x - 4, y + (isDisc ? 11 : 8),
+               { width: col.total.w, align: 'right', lineBreak: false });
+
+      y += rowH;
+      if (y > doc.page.height - 130) { doc.addPage(); y = 20; }
+    });
+
+    y += 4;
+    this.line(doc, L, R, y, '#cbd5e1');
+    y += 6;
+
+    // ── CHEGIRMA ─────────────────────────────────────────────
+    const origTotal   = sale.items.reduce((s, i) => s + Number(i.baseTotal ?? i.customTotal), 0);
+    const actualTotal = Number(sale.grandTotal);
+
+    if (origTotal > actualTotal + 0.01) {
+      doc.fillColor('#94a3b8').font('Helvetica').fontSize(8)
+         .text('Asl narx jami:', L, y)
+         .text(money(origTotal), L, y, { width: PW, align: 'right' });
+      y += 13;
+      const discAmt = origTotal - actualTotal;
+      const discPct = ((discAmt / origTotal) * 100).toFixed(1);
+      doc.fillColor('#16a34a').font('Helvetica').fontSize(8)
+         .text(`Chegirma (-${discPct}%):`, L, y)
+         .text(`-${money(discAmt)}`, L, y, { width: PW, align: 'right' });
+      y += 13;
     }
 
-    // Bu savdo nasiyasi row
-    if (showThisDebtRow) {
-      fillRect(L, y, PW, 18, '#fef2f2');
-      doc.save().font('Helvetica').fontSize(9).fillColor('#dc2626').text('Bu savdo nasiyasi:', L + 8, y + 4).restore();
-      doc.save().font('Helvetica-Bold').fontSize(9).fillColor('#dc2626').text(fmt(currentSaleDebt), L, y + 4, { width: PW - 8, align: 'right' }).restore();
-      hline(y + 18, 0.3, '#fecaca');
-      y += 18;
+    // ── JAMI TO'LOV ───────────────────────────────────────────
+    doc.rect(L, y, PW, 32).fill('#1e293b');
+    doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(10)
+       .text("UMUMIY TO'LOV:", L + 10, y + 10);
+    doc.fillColor('#fbbf24').font('Helvetica-Bold').fontSize(14)
+       .text(money(actualTotal), L, y + 8, { width: PW - 10, align: 'right' });
+    y += 40;
+
+    // ── TO'LOV TARKIBI ────────────────────────────────────────
+    const payRows: { label: string; amount: number; color: string }[] = [];
+    if (cashAmt > 0) payRows.push({ label: 'Naqd pul:',     amount: cashAmt, color: '#15803d' });
+    if (cardAmt > 0) payRows.push({ label: 'Plastik karta:', amount: cardAmt, color: '#1d4ed8' });
+    if (debtAmt > 0) payRows.push({ label: 'Nasiya (qarz):', amount: debtAmt, color: '#dc2626' });
+
+    if (payRows.length > 0) {
+      const bH = 14 + payRows.length * 15 + 4;
+      doc.rect(L, y, PW, bH).fill('#f1f5f9');
+      doc.fillColor('#334155').font('Helvetica-Bold').fontSize(8)
+         .text("TO'LOV TARKIBI:", L + 6, y + 5);
+      y += 17;
+      payRows.forEach(row => {
+        doc.fillColor('#475569').font('Helvetica').fontSize(8.5).text(row.label, L + 6, y);
+        doc.fillColor(row.color).font('Helvetica-Bold').fontSize(8.5)
+           .text(money(row.amount), L, y, { width: PW - 6, align: 'right' });
+        y += 15;
+      });
+      y += 4;
     }
 
-    // UMUMIY QOLDIQ — main prominent row
-    fillRect(L, y, PW, 28, isFullyClean ? '#166534' : '#7f1d1d');
-    doc.save().font('Helvetica-Bold').fontSize(10).fillColor('#ffffff').text('UMUMIY QOLDIQ:', L + 8, y + 8).restore();
-    doc.save().font('Helvetica-Bold').fontSize(14)
-      .fillColor(isFullyClean ? '#86efac' : '#fef08a')
-      .text(fmt(totalCustomerDebt), L, y + 6, { width: PW - 8, align: 'right' }).restore();
-    y += 28;
+    // ── QARZ BLOKI ────────────────────────────────────────────
+    if (debt.hasDebt) {
+      y += 6;
+      // prevDebt > 0 bo'lsa 3 qator, bo'lmasa 2 qator
+      const bH = debt.prevDebt > 0 ? 72 : 52;
+      doc.rect(L, y, PW, bH).lineWidth(1.5).strokeColor('#dc2626').stroke();
+      doc.rect(L, y, PW, 18).fill('#fef2f2');
+      doc.fillColor('#dc2626').font('Helvetica-Bold').fontSize(9)
+         .text("QARZDORLIK MA'LUMOTLARI", L + 6, y + 5);
+      y += 21;
 
-    // Block border
-    const blockHeight = y - blockStartY;
-    doc.save().rect(L, blockStartY, PW, blockHeight).lineWidth(0.8).strokeColor(hasAnyDebt ? '#dc2626' : '#16a34a').stroke().restore();
+      // Bu savdo qarzi
+      if (debt.currentDebt > 0) {
+        doc.fillColor('#374151').font('Helvetica').fontSize(8.5)
+           .text('Bu savdo qarz:', L + 8, y);
+        doc.fillColor('#dc2626').font('Helvetica-Bold').fontSize(8.5)
+           .text(money(debt.currentDebt), L, y, { width: PW - 8, align: 'right' });
+        y += 15;
+      }
 
-    // ── FOOTER ─────────────────────────────────────────────────────────────────
-    y += 20;
-    hline(y, 0.5, '#e2e8f0'); y += 10;
-    doc.save().font('Helvetica').fontSize(9).fillColor('#94a3b8').text('Xaridingiz uchun tashakkur!', L, y, { width: PW, align: 'center' }).restore();
-    y += 13;
-    doc.save().font('Helvetica').fontSize(8).fillColor('#cbd5e1').text('Yana tashrif buyuring • tanirovkaoptom.uz', L, y, { width: PW, align: 'center' }).restore();
+      // Oldingi qarz — bu savdodan OLDINGI qarz
+      // totalDebt = customer.totalDebt (CustomerEntity da saqlanadi)
+      // prevDebt = totalDebt - currentDebt
+      if (debt.prevDebt > 0) {
+        doc.fillColor('#374151').font('Helvetica').fontSize(8.5)
+           .text('Oldingi qarz:', L + 8, y);
+        doc.fillColor('#92400e').font('Helvetica-Bold').fontSize(8.5)
+           .text(money(debt.prevDebt), L, y, { width: PW - 8, align: 'right' });
+        y += 15;
+      }
 
-    doc.end();
+      this.line(doc, L + 6, R - 6, y, '#fca5a5');
+      y += 5;
+
+      // Umumiy qarz = customer.totalDebt (barcha savdolar bo'yicha)
+      doc.fillColor('#991b1b').font('Helvetica-Bold').fontSize(10)
+         .text('UMUMIY QARZ:', L + 8, y);
+      doc.fillColor('#dc2626').font('Helvetica-Bold').fontSize(11)
+         .text(money(debt.totalDebt), L, y - 1, { width: PW - 8, align: 'right' });
+      y += 20;
+    }
+
+    // ── FOOTER ────────────────────────────────────────────────
+    y += 10;
+    this.line(doc, L, R, y);
+    y += 8;
+    doc.fillColor('#94a3b8').font('Helvetica').fontSize(7.5)
+       .text('Xarid uchun rahmat!', L, y, { width: PW, align: 'center' });
+    y += 11;
+    doc.fillColor('#cbd5e1').fontSize(7)
+       .text('Tanirovka Optom', L, y, { width: PW, align: 'center' });
+  }
+
+  private line(doc: PDFKit.PDFDocument, x1: number, x2: number, y: number, color = '#e2e8f0') {
+    doc.moveTo(x1, y).lineTo(x2, y).lineWidth(0.5).strokeColor(color).stroke();
   }
 }
