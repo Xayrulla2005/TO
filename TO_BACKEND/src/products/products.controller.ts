@@ -1,5 +1,5 @@
 // ============================================================
-// src/products/products.controller.ts - COMPLETE
+// src/products/products.controller.ts
 // ============================================================
 import {
   Controller,
@@ -13,8 +13,10 @@ import {
   UseGuards,
   UseInterceptors,
   UploadedFile,
-} from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+  ParseUUIDPipe,
+  BadRequestException,
+} from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
 import {
   ApiTags,
   ApiOperation,
@@ -24,129 +26,179 @@ import {
   ApiResponse,
   ApiParam,
   ApiQuery,
-} from '@nestjs/swagger';
-import { ProductsService } from './products.service';
-import { CreateProductDto, UpdateProductDto } from './dto/create-product.dto';
-import { PaginationDto } from '../common/dto/pagination.dto';
-import { JwtAuthGuard } from '../common/guards/jwt.auth.guard';
-import { RolesGuard } from '../common/guards/roles.guard';
-import { Roles } from '../common/decarators/roles.decarator';
-import { CurrentUser } from '../common/decarators/current.user.decarator';
-import { UserRole } from '../common/dto/roles.enum';
-import { multerOptions, UPLOAD_CONFIG } from './config/multer.config';
+} from "@nestjs/swagger";
+import { ProductsService } from "./products.service";
+import { CreateProductDto, UpdateProductDto } from "./dto/create-product.dto";
+import { ProductQueryDto } from "../common/dto/pagination.query.dto";
+import { JwtAuthGuard } from "../common/guards/jwt.auth.guard";
+import { RolesGuard } from "../common/guards/roles.guard";
+import { Roles } from "../common/decarators/roles.decarator";
+import { CurrentUser } from "../common/decarators/current.user.decarator";
+import { UserRole } from "../common/dto/roles.enum";
+import { multerOptions } from "./config/multer.config";
 
-@ApiTags('Products')
-@Controller('api/v1/products')
+@ApiTags("Products")
+@Controller("api/v1/products")
 @UseGuards(JwtAuthGuard, RolesGuard)
 @ApiBearerAuth()
 export class ProductsController {
   constructor(private readonly productsService: ProductsService) {}
 
+  // ─── Create ───────────────────────────────────────────────
   @Post()
   @Roles(UserRole.ADMIN)
-  @UseInterceptors(FileInterceptor('image', multerOptions))
-  @ApiOperation({ summary: 'Create product with optional image (ADMIN)' })
-  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileInterceptor("image", multerOptions))
+  @ApiOperation({ summary: "Yangi mahsulot yaratish (faqat ADMIN)" })
+  @ApiConsumes("multipart/form-data")
   @ApiBody({
     schema: {
-      type: 'object',
-      required: ['name', 'purchasePrice', 'salePrice', 'unit'],
+      type: "object",
+      required: ["name", "purchasePrice", "salePrice", "unit"],
       properties: {
-        name: { type: 'string' },
-        categoryId: { type: 'string', format: 'uuid' },
-        purchasePrice: { type: 'number' },
-        salePrice: { type: 'number' },
-        unit: { type: 'string' },
-        stockQuantity: { type: 'number' },
-        minStockLimit: { type: 'number' },
-        image: { type: 'string', format: 'binary' },
+        name:          { type: "string",  example: "Laptop" },
+        categoryId:    { type: "string",  format: "uuid" },
+        purchasePrice: { type: "number",  example: 500 },
+        salePrice:     { type: "number",  example: 650 },
+        unit:          { type: "string",  example: "piece" },
+        stockQuantity: { type: "number",  example: 10 },
+        minStockLimit: { type: "number",  example: 5 },
+        image:         { type: "string",  format: "binary" },
       },
     },
   })
+  @ApiResponse({ status: 201, description: "Mahsulot yaratildi" })
+  @ApiResponse({ status: 409, description: "Bu nomli mahsulot allaqachon mavjud" })
   async create(
-    @Body() dto: CreateProductDto,
-    @UploadedFile() file: Express.Multer.File,
-    @CurrentUser('id') userId: string,
+    @Body()                       dto:    CreateProductDto,
+    @UploadedFile()               file:   Express.Multer.File,
+    @CurrentUser("id")            userId: string,
   ) {
     return this.productsService.create(dto, file, userId);
   }
 
-  @Put(':id')
+  // ─── Update ───────────────────────────────────────────────
+  @Put(":id")
   @Roles(UserRole.ADMIN)
-  @UseInterceptors(FileInterceptor('image', multerOptions))
-  @ApiOperation({ summary: 'Update product with optional image (ADMIN)' })
-  @ApiConsumes('multipart/form-data')
-  @ApiParam({ name: 'id' })
+  @UseInterceptors(FileInterceptor("image", multerOptions))
+  @ApiOperation({ summary: "Mahsulotni yangilash (faqat ADMIN)" })
+  @ApiConsumes("multipart/form-data")
+  @ApiParam({ name: "id", description: "Mahsulot UUID" })
   @ApiBody({
     schema: {
-      type: 'object',
+      type: "object",
       properties: {
-        name: { type: 'string' },
-        categoryId: { type: 'string', format: 'uuid' },
-        purchasePrice: { type: 'number' },
-        salePrice: { type: 'number' },
-        unit: { type: 'string' },
-        stockQuantity: { type: 'number' },
-        minStockLimit: { type: 'number' },
-        image: { type: 'string', format: 'binary' },
+        name:          { type: "string"  },
+        categoryId:    { type: "string", format: "uuid" },
+        purchasePrice: { type: "number" },
+        salePrice:     { type: "number" },
+        unit:          { type: "string" },
+        stockQuantity: { type: "number" },
+        minStockLimit: { type: "number" },
+        image:         { type: "string", format: "binary" },
       },
     },
   })
+  @ApiResponse({ status: 200, description: "Mahsulot yangilandi" })
+  @ApiResponse({ status: 404, description: "Mahsulot topilmadi" })
   async update(
-    @Param('id') id: string,
-    @Body() dto: UpdateProductDto,
-    @UploadedFile() file: Express.Multer.File,
-    @CurrentUser('id') userId: string,
+    @Param("id", ParseUUIDPipe)   id:     string,
+    @Body()                       dto:    UpdateProductDto,
+    @UploadedFile()               file:   Express.Multer.File,
+    @CurrentUser("id")            userId: string,
   ) {
     return this.productsService.update(id, dto, file, userId);
   }
 
+  // ─── List ─────────────────────────────────────────────────
   @Get()
-  @ApiOperation({ summary: 'List all products' })
-  async findAll(@Query() pagination: PaginationDto) {
-    return this.productsService.findAll(pagination);
+  @ApiOperation({ summary: "Mahsulotlar ro'yxati (pagination + qidiruv)" })
+  @ApiQuery({ name: "page",   required: false, description: "Sahifa raqami (default: 1)"  })
+  @ApiQuery({ name: "limit",  required: false, description: "Sahifadagi soni (default: 20)" })
+  @ApiQuery({ name: "search", required: false, description: "Mahsulot nomi bo'yicha qidiruv" })
+  @ApiResponse({ status: 200, description: "Mahsulotlar ro'yxati" })
+  async findAll(@Query() query: ProductQueryDto) {
+    // ✅ ProductQueryDto — search fieldi mavjud
+    return this.productsService.findAll(query);
   }
 
-  @Get('low-stock')
+  // ─── Low Stock ────────────────────────────────────────────
+  @Get("low-stock")
   @Roles(UserRole.ADMIN)
-  @ApiOperation({ summary: 'Get low stock products (ADMIN)' })
-  async getLowStock(@Query('threshold') threshold?: string) {
+  @ApiOperation({ summary: "Kam qoldiqli mahsulotlar (faqat ADMIN)" })
+  @ApiQuery({ name: "threshold", required: false, description: "Chegara miqdori" })
+  @ApiResponse({ status: 200, description: "Kam qoldiqli mahsulotlar" })
+  async getLowStock(@Query("threshold") threshold?: string) {
     const numThreshold = threshold ? parseInt(threshold, 10) : undefined;
+
+    if (threshold && (isNaN(numThreshold!) || numThreshold! < 0)) {
+      throw new BadRequestException("threshold musbat son bo'lishi kerak");
+    }
+
     return this.productsService.getLowStock(numThreshold);
   }
 
-  @Get(':id')
-  @ApiOperation({ summary: 'Get product by ID' })
-  async findOne(@Param('id') id: string) {
+  // ─── Get One ──────────────────────────────────────────────
+  @Get(":id")
+  @ApiOperation({ summary: "ID bo'yicha mahsulot olish" })
+  @ApiParam({ name: "id", description: "Mahsulot UUID" })
+  @ApiResponse({ status: 200, description: "Mahsulot ma'lumotlari" })
+  @ApiResponse({ status: 404, description: "Mahsulot topilmadi" })
+  async findOne(@Param("id", ParseUUIDPipe) id: string) {
     return this.productsService.findOne(id);
   }
 
-  @Delete(':id')
+  // ─── Delete ───────────────────────────────────────────────
+  @Delete(":id")
   @Roles(UserRole.ADMIN)
-  @ApiOperation({ summary: 'Soft delete product (ADMIN)' })
-  async remove(@Param('id') id: string, @CurrentUser('id') userId: string) {
+  @ApiOperation({ summary: "Mahsulotni o'chirish (soft delete, faqat ADMIN)" })
+  @ApiParam({ name: "id", description: "Mahsulot UUID" })
+  @ApiResponse({ status: 200, description: "Mahsulot o'chirildi" })
+  @ApiResponse({ status: 404, description: "Mahsulot topilmadi" })
+  async remove(
+    @Param("id", ParseUUIDPipe) id:     string,
+    @CurrentUser("id")          userId: string,
+  ) {
     return this.productsService.softDelete(id, userId);
   }
 
-  @Post(':id/restore')
+  // ─── Restore ──────────────────────────────────────────────
+  @Post(":id/restore")
   @Roles(UserRole.ADMIN)
-  @ApiOperation({ summary: 'Restore product (ADMIN)' })
-  async restore(@Param('id') id: string, @CurrentUser('id') userId: string) {
+  @ApiOperation({ summary: "O'chirilgan mahsulotni tiklash (faqat ADMIN)" })
+  @ApiParam({ name: "id", description: "Mahsulot UUID" })
+  @ApiResponse({ status: 200, description: "Mahsulot tiklandi" })
+  @ApiResponse({ status: 404, description: "Mahsulot topilmadi" })
+  async restore(
+    @Param("id", ParseUUIDPipe) id:     string,
+    @CurrentUser("id")          userId: string,
+  ) {
     return this.productsService.restore(id, userId);
   }
 
-  @Delete(':id/image')
+  // ─── Delete Image ─────────────────────────────────────────
+  @Delete(":id/image")
   @Roles(UserRole.ADMIN)
-  @ApiOperation({ summary: 'Delete product image (ADMIN)' })
-  async deleteImage(@Param('id') id: string, @CurrentUser('id') userId: string) {
+  @ApiOperation({ summary: "Mahsulot rasmini o'chirish (faqat ADMIN)" })
+  @ApiParam({ name: "id", description: "Mahsulot UUID" })
+  @ApiResponse({ status: 200, description: "Rasm o'chirildi" })
+  @ApiResponse({ status: 400, description: "Mahsulotda rasm yo'q" })
+  async deleteImage(
+    @Param("id", ParseUUIDPipe) id:     string,
+    @CurrentUser("id")          userId: string,
+  ) {
     return this.productsService.deleteImage(id, userId);
   }
 
-  @Post('cleanup-images')
+  // ─── Cleanup Images ───────────────────────────────────────
+  @Post("cleanup-images")
   @Roles(UserRole.ADMIN)
-  @ApiOperation({ summary: 'Cleanup orphaned images (ADMIN)' })
+  @ApiOperation({ summary: "Eski rasmlarni tozalash (faqat ADMIN)" })
+  @ApiResponse({ status: 200, description: "Tozalash natijasi" })
   async cleanupImages() {
     const deletedCount = await this.productsService.cleanupOrphanedImages();
-    return { deletedCount, message: `${deletedCount} orphaned images deleted` };
+    return {
+      deletedCount,
+      message: `${deletedCount} ta keraksiz rasm o'chirildi`,
+    };
   }
 }
