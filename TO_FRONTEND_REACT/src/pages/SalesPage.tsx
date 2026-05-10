@@ -287,7 +287,9 @@ export function SalesPage() {
   // ── Filterlash ───────────────────────────────────────────
   const filteredProducts = useMemo(() => sortProducts(
     allProducts.filter((p) => {
-      const matchSearch   = p.name.toLowerCase().includes(search.toLowerCase());
+      const s = search.toLowerCase();
+      const matchSearch   = p.name.toLowerCase().includes(s) ||
+                            (p.category?.name ?? '').toLowerCase().includes(s);
       const matchCategory = !selectedCategoryId || p.categoryId === selectedCategoryId;
       return matchSearch && matchCategory;
     }),

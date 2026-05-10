@@ -146,9 +146,10 @@ export class ProductsService {
     .orderBy('product.createdAt', 'DESC');
 
   if (search) {
-    query.andWhere('product.name ILIKE :search', {
-      search: `%${search}%`,
-    });
+    query.andWhere(
+      '(product.name ILIKE :search OR category.name ILIKE :search)',
+      { search: `%${search}%` },
+    );
   }
 
   const [products, total] = await query
