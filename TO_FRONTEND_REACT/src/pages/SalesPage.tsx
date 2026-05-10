@@ -304,11 +304,11 @@ export function SalesPage() {
 
   // ────────────────────────────────────────────────────────
   return (
-    <>
-      <div className="flex flex-col lg:flex-row gap-4 h-[100dvh] pb-20 lg:pb-0">
+    <div className="overflow-x-hidden">
+      <div className="flex flex-col lg:flex-row gap-4 h-[100dvh] pb-20 lg:pb-0 overflow-hidden">
 
         {/* ════ CHAP: Mahsulotlar ════ */}
-        <div className="flex-1 flex flex-col min-h-0">
+        <div className="flex-1 min-w-0 flex flex-col min-h-0 overflow-hidden">
 
           {/* Qidiruv + Kategoriyalar */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-3 mb-3 sticky top-0 z-10">
@@ -448,7 +448,7 @@ export function SalesPage() {
         </div>
 
         {/* ════ O'NG: Savat (Desktop) ════ */}
-        <div className="hidden lg:flex w-[400px] flex-col">
+        <div className="hidden lg:flex w-80 flex-shrink-0 flex-col">
           <Card className="flex flex-col h-full border-indigo-100 shadow-lg">
             <div className="p-4 border-b border-gray-100 flex items-center justify-between">
               <h2 className="font-bold text-base flex items-center gap-2 text-gray-800">
@@ -654,7 +654,7 @@ export function SalesPage() {
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }
 

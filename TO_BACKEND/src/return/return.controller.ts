@@ -19,9 +19,9 @@ import { Roles } from '../common/decarators/roles.decarator';
 import { CurrentUser } from '../common/decarators/current.user.decarator';
 import { UserRole } from '../common/dto/roles.enum';
 import { UserEntity } from '../user/entities/user.entity';
-import { PaginationDto } from '../common/dto/pagination.dto';
 import { ReturnsService } from './return.service';
 import { ApproveReturnDto, CreateReturnDto, RejectReturnDto } from './dto/create-return.dto';
+import { SaleQueryDto } from '../sale/dto/sale.query.dto';
 
 @ApiTags('Returns')
 @Controller('api/v1/returns')
@@ -63,15 +63,15 @@ export class ReturnsController {
   }
 
   @Get()
-  @Roles(UserRole.ADMIN)
-  @ApiOperation({ summary: 'List returns (ADMIN)' })
-  async findAll(@Query() pagination: PaginationDto) {
+  @Roles(UserRole.ADMIN, UserRole.SALER)
+  @ApiOperation({ summary: 'List returns (ADMIN, SALER)' })
+  async findAll(@Query() pagination: SaleQueryDto) {
     return this.returnsService.findAll(pagination);
   }
 
   @Get(':id')
-  @Roles(UserRole.ADMIN)
-  @ApiOperation({ summary: 'Get return details (ADMIN)' })
+  @Roles(UserRole.ADMIN, UserRole.SALER)
+  @ApiOperation({ summary: 'Get return details (ADMIN, SALER)' })
   async findById(@Param('id') returnId: string) {
     return this.returnsService.findById(returnId);
   }

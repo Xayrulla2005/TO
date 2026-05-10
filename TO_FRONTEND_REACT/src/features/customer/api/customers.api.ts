@@ -102,7 +102,9 @@ export interface Sale {
 
 export const customersApi = {
   getAll: async (search?: string): Promise<Customer[]> => {
-    const { data } = await api.get('/customers', { params: search ? { search } : {} });
+    const params: Record<string, unknown> = { limit: 9999 };
+    if (search) params.search = search;
+    const { data } = await api.get('/customers', { params });
     return data;
   },
 

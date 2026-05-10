@@ -849,46 +849,48 @@ function DebtListModal({
             </div>
           </div>
         </div>
-        <table className="w-full text-xs border-collapse">
-          <thead>
-            <tr className="bg-gray-100 border-b border-gray-200">
-              <th className="text-left px-3 py-2 font-semibold text-gray-500">Savdo</th>
-              <th className="text-center px-2 py-2 font-semibold text-gray-500 w-20">Sana</th>
-              <th className="text-right px-3 py-2 font-semibold text-gray-500 w-20">Qarz</th>
-              <th className="text-right px-3 py-2 font-semibold text-gray-500 w-20">Qoldiq</th>
-            </tr>
-          </thead>
-          <tbody>
-            {activeDebts.map(({ sale, debt }, sIdx) => {
-              const debtRem  = Math.round(Number(debt.remainingAmount) * 100) / 100;
-              const isPartial = debt.status === "PARTIALLY_PAID";
-              return (
-                <tr key={`row-${debt.id}`} className={`border-b border-gray-100 ${sIdx % 2 === 0 ? "bg-white" : "bg-slate-50/60"}`}>
-                  <td className="px-3 py-2">
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-bold text-gray-800">#{sale.saleNumber}</span>
-                      <span className={`text-xs px-1.5 py-0.5 rounded-full font-semibold ${isPartial ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"}`}>
-                        {isPartial ? "Qisman" : "To'lanmagan"}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="text-center px-2 py-2 text-gray-400 text-xs">{format(parseISO(sale.completedAt || sale.createdAt), "dd.MM.yy")}</td>
-                  <td className="text-right px-3 py-2 text-red-600 font-semibold">{fmt(Number(debt.originalAmount))}</td>
-                  <td className={`text-right px-3 py-2 font-black ${isPartial ? "text-amber-700" : "text-red-700"}`}>{fmt(debtRem)}</td>
-                </tr>
-              );
-            })}
-            <tr className="bg-gray-800">
-              <td colSpan={2} className="px-3 py-3 text-white font-bold text-sm">Jami: {activeDebts.length} ta savdo</td>
-              <td className="px-3 py-3 text-gray-300 text-right text-xs">
-                {totalPaid > 0 && <span className="text-emerald-400">To&apos;langan: {fmt(totalPaid)}</span>}
-              </td>
-              <td className="px-3 py-3 text-right">
-                <p className="text-yellow-400 font-black text-base">{fmt(totalRemaining)}</p>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[460px] text-xs border-collapse">
+            <thead>
+              <tr className="bg-gray-100 border-b border-gray-200">
+                <th className="text-left px-3 py-2 font-semibold text-gray-500 min-w-[180px]">Savdo</th>
+                <th className="text-center px-2 py-2 font-semibold text-gray-500 min-w-[80px]">Sana</th>
+                <th className="text-right px-3 py-2 font-semibold text-gray-500 min-w-[100px]">Qarz</th>
+                <th className="text-right px-3 py-2 font-semibold text-gray-500 min-w-[100px]">Qoldiq</th>
+              </tr>
+            </thead>
+            <tbody>
+              {activeDebts.map(({ sale, debt }, sIdx) => {
+                const debtRem  = Math.round(Number(debt.remainingAmount) * 100) / 100;
+                const isPartial = debt.status === "PARTIALLY_PAID";
+                return (
+                  <tr key={`row-${debt.id}`} className={`border-b border-gray-100 ${sIdx % 2 === 0 ? "bg-white" : "bg-slate-50/60"}`}>
+                    <td className="px-3 py-2 min-w-[180px]">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-bold text-gray-800">#{sale.saleNumber}</span>
+                        <span className={`text-xs px-1.5 py-0.5 rounded-full font-semibold ${isPartial ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"}`}>
+                          {isPartial ? "Qisman" : "To'lanmagan"}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="text-center px-2 py-2 text-gray-400 text-xs min-w-[80px]">{format(parseISO(sale.completedAt || sale.createdAt), "dd.MM.yy")}</td>
+                    <td className="text-right px-3 py-2 text-red-600 font-semibold min-w-[100px]">{fmt(Number(debt.originalAmount))}</td>
+                    <td className={`text-right px-3 py-2 font-black min-w-[100px] ${isPartial ? "text-amber-700" : "text-red-700"}`}>{fmt(debtRem)}</td>
+                  </tr>
+                );
+              })}
+              <tr className="bg-gray-800">
+                <td colSpan={2} className="px-3 py-3 text-white font-bold text-sm">Jami: {activeDebts.length} ta savdo</td>
+                <td className="px-3 py-3 text-gray-300 text-right text-xs">
+                  {totalPaid > 0 && <span className="text-emerald-400">To&apos;langan: {fmt(totalPaid)}</span>}
+                </td>
+                <td className="px-3 py-3 text-right">
+                  <p className="text-yellow-400 font-black text-base">{fmt(totalRemaining)}</p>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <button onClick={() => setShowBulkPay(true)}

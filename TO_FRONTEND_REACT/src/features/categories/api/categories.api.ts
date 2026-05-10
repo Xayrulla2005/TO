@@ -3,8 +3,7 @@ import { Category, CreateCategoryDto, UpdateCategoryDto } from '../../../shared/
 
 export const categoriesApi = {
   getAll: async () => {
-    const { data } = await api.get('/categories');
-    // ✅ FIX 1: Backend {data: [...]} yoki to'g'ridan array qaytarishi mumkin
+    const { data } = await api.get('/categories', { params: { limit: 9999 } });
     return Array.isArray(data) ? data : (data.data ?? []);
   },
 
